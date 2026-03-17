@@ -50,6 +50,21 @@ In your fork: **Settings → Secrets and variables → Actions → New repositor
 - `LINKEDIN_PERSON_URN` = your person URN (example: `urn:li:person:abc123...`)
 - `NVIDIA_NIM_API_KEY` = your NVIDIA NIM API key (optional; fallback summarizer is used when absent)
 
+### Fast local bootstrap (recommended)
+
+After creating your LinkedIn app, you can let a helper script fetch token + URN and save both secrets automatically:
+
+```bash
+python src/bootstrap_linkedin_secrets.py \
+  --client-id "<YOUR_LINKEDIN_CLIENT_ID>" \
+  --repo "Rohan5commit/linkedin-ai-finance-reposter"
+```
+
+It opens LinkedIn auth in your browser, captures callback locally, exchanges token, calls `/v2/me`, and writes:
+
+- `LINKEDIN_TOKEN`
+- `LINKEDIN_PERSON_URN`
+
 ## 3) Get a LinkedIn API token and person URN
 
 1. Create a LinkedIn app: <https://www.linkedin.com/developers/apps>
