@@ -1,0 +1,43 @@
+name: Post Trending AI and Finance News
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 2,5"
+
+jobs:
+  repost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run repost automation
+        env:
+          LINKEDIN_TOKEN: ${{ secrets.LINKEDIN_TOKEN }}
+          LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
+          NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+          NIM_MODEL: meta/llama-3.1-8b-instruct
+        run: python src/main.py
+
+      - name: Success log
+        if: ${{ success() }}
+        run: echo "LinkedIn repost completed successfully."
+
+      - name: Failure log
+        if: ${{ failure() }}
+        run: |
+          echo "LinkedIn repost failed. Inspect logs for details."
+          exit 1
