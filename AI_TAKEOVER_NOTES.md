@@ -12,7 +12,10 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Workflow: `.github/workflows/post.yml`
 - Schedule: Tuesday + Friday at 09:00 UTC (`0 9 * * 2,5`)
 - Last successful manual workflow run: `23226222725` (**success**, article card mode)
-- Latest direct-repost validation runs: `23226616001`, `23226692481`, `23226778661` (**failed**, HTTP 403 on all third-party repost attempts)
+- Latest direct-repost validation runs:
+  - `23226616001`, `23226692481`, `23226778661` (**failed**, 403 on all attempts before parent URN resolver fix)
+  - `23226908393` (**success**, direct repost)
+  - `23226942183` (**success**, direct repost, share id `urn:li:share:7439867589482340352`)
 
 ## 2) What was implemented (chronological)
 
@@ -38,6 +41,8 @@ It records **what was done**, **why those choices were made**, and **what to do 
 12. Live-validated article-card posting after the change (`share urn:li:share:7439860186632101888`).
 13. Added true direct-repost mode using LinkedIn Posts API (`/rest/posts` + `reshareContext.parent`) with default `LINKEDIN_DIRECT_REPOST_ONLY=true`.
 14. Added public LinkedIn post discovery via DuckDuckGo HTML search and URN extraction from post URLs.
+15. Added page-metadata parent URN resolver (extract `share`/`ugcPost` URNs from public post HTML and rank vs activity ID), which unlocked successful third-party direct reposts.
+16. Added compatibility fallback from `/rest/posts` reshare to `ugcPosts` response-context reshare; latest success used this fallback path.
 
 ## 3) Key decisions and rationale
 
@@ -101,7 +106,7 @@ No secrets are stored in committed files.
 1. LinkedIn access token is time-bound; if runs fail with `INVALID_ACCESS_TOKEN`, refresh token and reset secret.
 2. GitHub Actions currently shows Node 20 deprecation annotations for `actions/checkout@v4` and `actions/setup-python@v5`. Track updates.
 3. Reuters direct feed failures are expected in some environments; fallback path is intentional.
-4. Direct repost of third-party LinkedIn posts is currently blocked with HTTP 403 for this app/token. Code now surfaces this explicitly; likely requires LinkedIn-approved restricted access and repostable target visibility.
+4. Direct repost now works with page-derived parent URNs + API fallback. Keep the 403 diagnostic in place because permissions/target visibility can still cause failures on specific posts.
 
 ## 6) Useful operational commands
 

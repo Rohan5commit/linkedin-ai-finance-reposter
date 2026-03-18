@@ -5,9 +5,11 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 ## What this repository does
 
 - Discovers candidate public LinkedIn posts via free web search (`duckduckgo.com/html` fetched through `r.jina.ai`) constrained to `linkedin.com/posts` and AI/tech/finance queries.
-- Extracts candidate parent URNs from LinkedIn post URLs (`activity`, `share`, `ugcPost` variants).
+- Extracts candidate parent URNs from public LinkedIn page metadata (`urn:li:share:*` / `urn:li:ugcPost:*`) and ranks them against the URL activity ID.
 - Filters and ranks candidates for topical relevance and recency-style search ranking.
-- Publishes a **true direct repost** via LinkedIn Posts API (`POST /rest/posts`) using `reshareContext.parent`.
+- Publishes a **true direct repost** by trying:
+  - LinkedIn Posts API (`POST /rest/posts`, `reshareContext.parent`)
+  - compatibility fallback via `ugcPosts` (`responseContext.parent`)
 - Adds short professional commentary + hashtags to improve feed engagement while still being a direct repost.
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
@@ -155,6 +157,7 @@ Mode switch:
 - In legacy article mode, if no relevant article is found, the run is skipped with a warning and exits successfully.
 - If no repostable LinkedIn post candidates are found, the run is skipped with a warning and exits successfully.
 - If all repost attempts fail (invalid parent/private post/permissions), the script prints the last API error body and exits non-zero, so GitHub Actions marks the run as failed.
+- If every repost attempt returns `403`, the script logs an explicit permission warning to speed up LinkedIn access troubleshooting.
 
 ## Notes
 
