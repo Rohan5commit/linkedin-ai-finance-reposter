@@ -13,6 +13,7 @@ Python automation that fetches trending AI and finance news from free sources an
 - Scores each candidate by relevance, recency, and source signals.
 - Filters out generic market-recap style headlines (e.g., daily futures/closing summaries).
 - Picks one top trending/relevant article per run.
+- Enforces LinkedIn commentary length limit (max 3000 chars) before posting.
 - Builds a neutral, professional LinkedIn post:
   - engaging hook
   - 2-3 sentence summary

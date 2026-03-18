@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 USER_AGENT = "linkedin-ai-finance-reposter/1.0"
 REQUEST_TIMEOUT = 20
+LINKEDIN_MAX_POST_CHARS = 3000
 HN_TOP_STORIES_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
 HN_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
 LINKEDIN_API_URL = "https://api.linkedin.com/v2/ugcPosts"
@@ -274,6 +275,14 @@ def truncate_words(text: str, max_words: int) -> str:
     if len(tokens) <= max_words:
         return text.strip()
     return " ".join(tokens[:max_words]).rstrip(",;:-") + "."
+
+
+def truncate_chars(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 1:
+        return text[:max_chars]
+    return text[: max_chars - 1].rstrip(" ,;:-") + "…"
 
 
 def split_sentences(text: str) -> list[str]:
@@ -735,6 +744,14 @@ def build_post(candidate: ArticleCandidate, profile: LengthProfile) -> str:
             f"Source: {candidate.url}\n\n"
             f"{' '.join(hashtags)}"
         )
+
+    # LinkedIn UGC posts reject share commentary beyond 3000 chars.
+    if len(post_text) > LINKEDIN_MAX_POST_CHARS:
+        prefix = f"{hook}\n\n"
+        suffix = f"\n\nSource: {candidate.url}\n\n{' '.join(hashtags)}"
+        allowed_summary_chars = max(0, LINKEDIN_MAX_POST_CHARS - len(prefix) - len(suffix))
+        summary = truncate_chars(summary, allowed_summary_chars)
+        post_text = f"{prefix}{summary}{suffix}"
 
     return post_text
 

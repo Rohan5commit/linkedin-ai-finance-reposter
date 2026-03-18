@@ -62,6 +62,11 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Switched summarization integration from OpenAI to NVIDIA NIM per user preference.
 - If NIM key is absent or call fails, deterministic local fallback summary remains active.
 
+### F) LinkedIn max-length enforcement
+
+- Added strict post-length enforcement so final `shareCommentary.text` is always <= 3000 characters.
+- Reason: LinkedIn `ugcPosts` rejects payloads above 3000 chars with HTTP 400.
+
 ## 4) Secrets and credentials model
 
 Repository expects these GitHub Actions secrets:
