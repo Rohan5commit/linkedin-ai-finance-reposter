@@ -10,7 +10,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Core automation script: `src/main.py`
 - LinkedIn bootstrap helper: `src/bootstrap_linkedin_secrets.py`
 - Workflow: `.github/workflows/post.yml`
-- Schedule trigger: daily at 09:00 UTC (`0 9 * * *`) with in-script weekly random-day gate (2 days/week)
+- Schedule trigger: Tuesday + Friday at 09:00 UTC (`0 9 * * 2` and `0 9 * * 5`)
 - Last successful manual workflow run: `23226222725` (**success**, article card mode)
 - Latest direct-repost validation runs:
   - `23226616001`, `23226692481`, `23226778661` (**failed**, 403 on all attempts before parent URN resolver fix)
@@ -104,6 +104,12 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - User requested non-fixed weekdays.
 - Workflow now triggers daily at 09:00 UTC, and Python gate decides whether today is one of this week's 2 random selected days.
 - Day selection is deterministic per ISO week using `RANDOM_SCHEDULE_SEED`, avoiding drift/re-randomization within the same week.
+
+### K) Scheduler simplification (non-daily)
+
+- User requested non-daily scheduling again after live tests.
+- Updated workflow schedule back to fixed twice-weekly runs (Tue/Fri 09:00 UTC).
+- Set `RANDOMIZE_WEEKLY_RUN_DAYS=false` in workflow env so schedule behavior is explicit and predictable.
 
 ### J) Persistent duplicate suppression (cross-run)
 
