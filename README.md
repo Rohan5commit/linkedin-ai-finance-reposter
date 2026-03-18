@@ -13,7 +13,8 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Adds short professional commentary + hashtags to improve feed engagement while still being a direct repost.
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
 - If live search discovery is temporarily blocked, uses a curated fallback list of public AI/tech/finance LinkedIn post URLs so runs can still execute.
-- Applies run-based candidate rotation to reduce back-to-back duplicate reposts during burst/manual runs.
+- Applies run-based candidate rotation plus persistent repost-history cooldown filtering to prevent heavy repeats.
+- Persists recent repost parent URNs across workflow runs using GitHub Actions cache (`.cache/repost_history.json`).
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
 
 ## Repository structure
@@ -135,8 +136,10 @@ Workflow file: `.github/workflows/post.yml`
 Workflow steps:
 
 1. Install dependencies
-2. Run `python src/main.py`
-3. Log success/failure
+2. Restore repost history cache (`.cache/repost_history.json`)
+3. Run `python src/main.py`
+4. Save updated repost history cache automatically at job end
+5. Log success/failure
 
 ## 6) Local testing
 
@@ -156,11 +159,15 @@ Mode switch:
 - `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
 - `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce 2-random-days-per-week gate on scheduled runs
 - `RANDOM_SCHEDULE_SEED=<string>`: changes which two days are selected each week
+- `REPOST_HISTORY_FILE=.cache/repost_history.json`: file used for cross-run repost memory
+- `REPOST_HISTORY_MAX_ENTRIES=500`: max parent URNs retained in history
+- `REPOST_COOLDOWN_POSTS=120`: most-recent reposts blocked from reuse
 
 ## Error handling behavior
 
 - In legacy article mode, if no relevant article is found, the run is skipped with a warning and exits successfully.
 - If no repostable LinkedIn post candidates are found, the run is skipped with a warning and exits successfully.
+- If all discovered repost candidates were used recently (cooldown history hit), the run is skipped with a warning to avoid duplicates.
 - If all repost attempts fail (invalid parent/private post/permissions), the script prints the last API error body and exits non-zero, so GitHub Actions marks the run as failed.
 - If every repost attempt returns `403`, the script logs an explicit permission warning to speed up LinkedIn access troubleshooting.
 

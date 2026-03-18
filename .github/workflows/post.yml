@@ -15,6 +15,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Restore repost history cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/repost_history.json
+          key: repost-history-${{ github.run_id }}
+          restore-keys: |
+            repost-history-
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -34,6 +42,9 @@ jobs:
           LINKEDIN_DIRECT_REPOST_ONLY: "true"
           RANDOMIZE_WEEKLY_RUN_DAYS: "true"
           RANDOM_SCHEDULE_SEED: ${{ github.repository }}
+          REPOST_HISTORY_FILE: .cache/repost_history.json
+          REPOST_HISTORY_MAX_ENTRIES: "500"
+          REPOST_COOLDOWN_POSTS: "120"
         run: python src/main.py
 
       - name: Success log

@@ -46,6 +46,11 @@ It records **what was done**, **why those choices were made**, and **what to do 
 17. Replaced fixed Tue/Fri cadence with weekly random day selection (2 random days chosen per ISO week, deterministic from seed).
 18. Added fallback candidate source: curated public LinkedIn post URL list used when live search discovery is unavailable.
 19. Added run-based candidate rotation to avoid posting the same source repeatedly in burst/manual runs.
+20. Added persistent anti-duplication state:
+   - tracks recently reposted parent URNs in `.cache/repost_history.json`
+   - blocks candidates that hit the recent cooldown window
+   - persists history across runs via GitHub Actions cache restore/save
+   - cleanly skips runs (success) when all candidates are recently used, instead of reposting duplicates
 
 ## 3) Key decisions and rationale
 
@@ -100,6 +105,13 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Workflow now triggers daily at 09:00 UTC, and Python gate decides whether today is one of this week's 2 random selected days.
 - Day selection is deterministic per ISO week using `RANDOM_SCHEDULE_SEED`, avoiding drift/re-randomization within the same week.
 
+### J) Persistent duplicate suppression (cross-run)
+
+- Run-rotation alone reduced repeats in bursts but did not fully prevent reusing the same parent posts over many manual runs.
+- Implemented hard cooldown using persisted parent-URN history (`REPOST_COOLDOWN_POSTS`) and capped retention (`REPOST_HISTORY_MAX_ENTRIES`).
+- Added workflow cache for `.cache/repost_history.json` so history survives between GitHub Action runs.
+- If every candidate is in cooldown, the run now skips with warning (prevents feed spam/repetition).
+
 ## 4) Secrets and credentials model
 
 Repository expects these GitHub Actions secrets:
@@ -117,6 +129,7 @@ No secrets are stored in committed files.
 3. Reuters direct feed failures are expected in some environments; fallback path is intentional.
 4. Direct repost now works with page-derived parent URNs + API fallback. Keep the 403 diagnostic in place because permissions/target visibility can still cause failures on specific posts.
 5. Search discovery via `r.jina.ai` can intermittently return HTTP 451; fallback URL list is in place to avoid full-run skips.
+6. During aggressive manual burst testing, repeated reposts can happen if history persistence is disabled/missing; keep cache + history env vars enabled.
 
 ## 6) Useful operational commands
 

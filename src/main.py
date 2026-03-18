@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import json
 import os
 import random
 import re
@@ -35,6 +36,9 @@ LINKEDIN_POSTS_API_URL = "https://api.linkedin.com/rest/posts"
 LINKEDIN_API_VERSION = "202510"
 NVIDIA_NIM_CHAT_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 DIRECT_REPOST_RESULT_LIMIT = 20
+DEFAULT_REPOST_HISTORY_FILE = ".cache/repost_history.json"
+DEFAULT_REPOST_HISTORY_MAX_ENTRIES = 250
+DEFAULT_REPOST_COOLDOWN_POSTS = 80
 
 DIRECT_REPOST_QUERIES = [
     (
@@ -306,6 +310,61 @@ def weekly_random_run_days(seed_material: str, now_utc: datetime) -> list[int]:
     digest = hashlib.sha256(week_key.encode("utf-8")).hexdigest()
     rng = random.Random(int(digest[:16], 16))
     return sorted(rng.sample(list(range(7)), 2))
+
+
+def parse_positive_int_env(name: str, default_value: int) -> int:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default_value
+    if raw_value.isdigit() and int(raw_value) > 0:
+        return int(raw_value)
+    log("WARN", f"Invalid {name}='{raw_value}'; using default {default_value}.")
+    return default_value
+
+
+def load_repost_history(file_path: str, max_entries: int) -> list[str]:
+    if not file_path or not os.path.exists(file_path):
+        return []
+    try:
+        with open(file_path, "r", encoding="utf-8") as history_file:
+            payload = json.load(history_file)
+    except (OSError, ValueError) as error:
+        log("WARN", f"Failed to load repost history from {file_path} ({error}).")
+        return []
+
+    urn_values = payload.get("recent_parent_urns", [])
+    if not isinstance(urn_values, list):
+        return []
+
+    cleaned_urns = [
+        urn.strip()
+        for urn in urn_values
+        if isinstance(urn, str) and urn.strip().startswith("urn:li:")
+    ]
+    return unique_preserve_order(cleaned_urns)[-max_entries:]
+
+
+def save_repost_history(file_path: str, recent_parent_urns: list[str], max_entries: int) -> None:
+    directory = os.path.dirname(file_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    deduped_urns = unique_preserve_order(
+        [urn for urn in recent_parent_urns if isinstance(urn, str) and urn.startswith("urn:li:")]
+    )
+    payload = {
+        "recent_parent_urns": deduped_urns[-max_entries:],
+        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    with open(file_path, "w", encoding="utf-8") as history_file:
+        json.dump(payload, history_file, ensure_ascii=True, indent=2)
+        history_file.write("\n")
+
+
+def recent_parent_urn_window(recent_parent_urns: list[str], cooldown_posts: int) -> set[str]:
+    if cooldown_posts <= 0:
+        return set()
+    return set(recent_parent_urns[-cooldown_posts:])
 
 
 def clean_text(raw: str) -> str:
@@ -580,17 +639,18 @@ def build_title_from_linkedin_post_url(post_url: str) -> str:
     return truncate_words(cleaned, 18)
 
 
-def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RESULT_LIMIT) -> list[RepostCandidate]:
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; linkedin-ai-finance-reposter/1.0)"}
-    redirect_regex = re.compile(r"http://duckduckgo\.com/l/\?uddg=([^)\s&]+)", re.IGNORECASE)
-
-    candidates_by_urn: dict[str, RepostCandidate] = {}
-
-    for query_topic, query_text in DIRECT_REPOST_QUERIES:
-        query_url = (
-            "https://r.jina.ai/http://duckduckgo.com/html/?q="
-            + quote_plus(query_text)
-        )
+def fetch_duckduckgo_results_html(query_topic: str, query_text: str, headers: dict[str, str]) -> Optional[str]:
+    query_urls = [
+        (
+            "r.jina.ai",
+            "https://r.jina.ai/http://duckduckgo.com/html/?q=" + quote_plus(query_text),
+        ),
+        (
+            "duckduckgo-direct",
+            "https://duckduckgo.com/html/?q=" + quote_plus(query_text),
+        ),
+    ]
+    for source_name, query_url in query_urls:
         try:
             response = requests.get(
                 query_url,
@@ -599,15 +659,53 @@ def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RE
             )
             response.raise_for_status()
         except requests.RequestException as error:
-            log("WARN", f"DuckDuckGo query failed for topic '{query_topic}' ({error})")
+            log("WARN", f"DuckDuckGo query failed for topic '{query_topic}' via {source_name} ({error})")
+            continue
+
+        response_body = response.text.strip()
+        if not response_body:
+            log("WARN", f"DuckDuckGo query returned empty body for topic '{query_topic}' via {source_name}")
+            continue
+        if source_name != "r.jina.ai":
+            log("INFO", f"Using DuckDuckGo direct fallback for topic '{query_topic}'.")
+        return response_body
+    return None
+
+
+def extract_linkedin_post_urls_from_duckduckgo_html(html_body: str) -> list[str]:
+    redirect_param_regex = re.compile(r"uddg=([^&\s\"'<>)]{8,})", re.IGNORECASE)
+    direct_url_regex = re.compile(
+        r"https?://(?:[a-z]+\.)?linkedin\.com/(?:posts|feed/update)/[^\s\"'<>)]*",
+        re.IGNORECASE,
+    )
+    extracted_urls: list[str] = []
+    for match in redirect_param_regex.finditer(html_body):
+        extracted_urls.append(unquote(html.unescape(match.group(1))))
+    for match in direct_url_regex.finditer(html_body):
+        extracted_urls.append(match.group(0))
+    return unique_preserve_order([normalize_linkedin_post_url(url) for url in extracted_urls if url.strip()])
+
+
+def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RESULT_LIMIT) -> list[RepostCandidate]:
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; linkedin-ai-finance-reposter/1.0)"}
+
+    candidates_by_urn: dict[str, RepostCandidate] = {}
+
+    for query_topic, query_text in DIRECT_REPOST_QUERIES:
+        response_body = fetch_duckduckgo_results_html(query_topic, query_text, headers)
+        if not response_body:
+            continue
+
+        result_urls = extract_linkedin_post_urls_from_duckduckgo_html(response_body)
+        if not result_urls:
+            log("WARN", f"DuckDuckGo ({query_topic}): no LinkedIn post URLs found in results.")
             continue
 
         collected_for_query = 0
-        for rank, match in enumerate(redirect_regex.finditer(response.text), start=1):
+        for rank, target_url in enumerate(result_urls, start=1):
             if collected_for_query >= max_items_per_query:
                 break
 
-            target_url = normalize_linkedin_post_url(unquote(match.group(1)))
             lower_target = target_url.lower()
             if "linkedin.com/posts/" not in lower_target and "linkedin.com/feed/update/" not in lower_target:
                 continue
@@ -1257,10 +1355,17 @@ def publish_direct_repost(
     candidates: list[RepostCandidate],
     token: str,
     person_urn: str,
+    recent_parent_urns: Optional[list[str]] = None,
+    cooldown_posts: int = DEFAULT_REPOST_COOLDOWN_POSTS,
+    history_file_path: str = DEFAULT_REPOST_HISTORY_FILE,
+    history_max_entries: int = DEFAULT_REPOST_HISTORY_MAX_ENTRIES,
 ) -> int:
     last_error_body = ""
     attempt_count = 0
     forbidden_count = 0
+    duplicate_skip_count = 0
+    history_urns = list(recent_parent_urns or [])
+    recent_urn_set = recent_parent_urn_window(history_urns, cooldown_posts)
     for candidate in candidates:
         commentary = build_direct_reshare_commentary(candidate)
         discovered_parent_urns = discover_parent_urn_candidates_from_page(candidate.url)
@@ -1271,6 +1376,16 @@ def publish_direct_repost(
                 f"Resolved parent URNs from page metadata for '{candidate.title}': "
                 + ", ".join(parent_urns[:4]),
             )
+        if recent_urn_set:
+            matching_recent_urns = [urn for urn in parent_urns if urn in recent_urn_set]
+            if matching_recent_urns:
+                duplicate_skip_count += 1
+                log(
+                    "INFO",
+                    f"Skipping candidate due to recent repost history: title='{candidate.title}' "
+                    f"| recent_parent={matching_recent_urns[0]}",
+                )
+                continue
 
         for parent_urn in parent_urns:
             log(
@@ -1287,6 +1402,13 @@ def publish_direct_repost(
             attempt_count += 1
             if response.status_code in (200, 201):
                 log("INFO", f"Direct repost created successfully via parent={parent_urn}.")
+                history_urns = unique_preserve_order(history_urns + [parent_urn])[-history_max_entries:]
+                try:
+                    save_repost_history(history_file_path, history_urns, history_max_entries)
+                except OSError as error:
+                    log("WARN", f"Repost succeeded but failed to persist history ({error}).")
+                else:
+                    log("INFO", f"Persisted repost history: {len(history_urns)} entries.")
                 response_id = response.headers.get("x-restli-id") or response.headers.get("X-RestLi-Id")
                 if response.text.strip():
                     print(response.text)
@@ -1313,6 +1435,13 @@ def publish_direct_repost(
                 attempt_count += 1
                 if ugc_response.status_code in (200, 201):
                     log("INFO", f"Direct repost created successfully via ugcPosts parent={parent_urn}.")
+                    history_urns = unique_preserve_order(history_urns + [parent_urn])[-history_max_entries:]
+                    try:
+                        save_repost_history(history_file_path, history_urns, history_max_entries)
+                    except OSError as error:
+                        log("WARN", f"Repost succeeded but failed to persist history ({error}).")
+                    else:
+                        log("INFO", f"Persisted repost history: {len(history_urns)} entries.")
                     response_id = ugc_response.headers.get("x-restli-id") or ugc_response.headers.get("X-RestLi-Id")
                     if ugc_response.text.strip():
                         print(ugc_response.text)
@@ -1329,6 +1458,13 @@ def publish_direct_repost(
                 if ugc_response.text:
                     log("WARN", truncate_chars(clean_text(ugc_response.text), 350))
                 last_error_body = ugc_response.text
+
+    if candidates and duplicate_skip_count == len(candidates):
+        log(
+            "WARN",
+            "All repost candidates were recently used; skipping this run to prevent duplicate reposts.",
+        )
+        return 0
 
     if attempt_count > 0 and forbidden_count == attempt_count:
         log(
@@ -1418,6 +1554,15 @@ def main() -> int:
     direct_repost_only = os.getenv("LINKEDIN_DIRECT_REPOST_ONLY", "true").strip().lower() != "false"
     randomize_weekly_run_days = os.getenv("RANDOMIZE_WEEKLY_RUN_DAYS", "true").strip().lower() != "false"
     event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower()
+    repost_history_file = (
+        os.getenv("REPOST_HISTORY_FILE", DEFAULT_REPOST_HISTORY_FILE).strip()
+        or DEFAULT_REPOST_HISTORY_FILE
+    )
+    repost_history_max_entries = parse_positive_int_env(
+        "REPOST_HISTORY_MAX_ENTRIES",
+        DEFAULT_REPOST_HISTORY_MAX_ENTRIES,
+    )
+    repost_cooldown_posts = parse_positive_int_env("REPOST_COOLDOWN_POSTS", DEFAULT_REPOST_COOLDOWN_POSTS)
 
     if randomize_weekly_run_days and event_name == "schedule" and not args.ignore_random_schedule:
         now_utc = datetime.now(timezone.utc)
@@ -1444,6 +1589,36 @@ def main() -> int:
             log("WARN", "No repostable LinkedIn post candidates found; skipping this run.")
             return 0
         repost_candidates = prioritize_repost_candidates_for_run(repost_candidates)
+        recent_parent_urns = load_repost_history(repost_history_file, repost_history_max_entries)
+        if recent_parent_urns:
+            log(
+                "INFO",
+                f"Loaded repost history entries={len(recent_parent_urns)} from {repost_history_file}.",
+            )
+            recent_urn_set = recent_parent_urn_window(recent_parent_urns, repost_cooldown_posts)
+            before_count = len(repost_candidates)
+            repost_candidates = [
+                candidate
+                for candidate in repost_candidates
+                if not any(urn in recent_urn_set for urn in candidate.parent_urn_candidates)
+            ]
+            filtered_count = before_count - len(repost_candidates)
+            if filtered_count > 0:
+                log(
+                    "INFO",
+                    f"History pre-filter removed {filtered_count} URL-derived candidate(s) "
+                    f"(cooldown={min(repost_cooldown_posts, len(recent_parent_urns))}).",
+                )
+        else:
+            log("INFO", f"No repost history found at {repost_history_file}; starting with an empty history.")
+
+        if not repost_candidates:
+            log(
+                "WARN",
+                "All current repost candidates are in the recent history cooldown window; "
+                "skipping this run to avoid duplicates.",
+            )
+            return 0
 
         top_candidate = repost_candidates[0]
         top_commentary = build_direct_reshare_commentary(top_candidate)
@@ -1468,7 +1643,15 @@ def main() -> int:
             log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
             return 1
 
-        return publish_direct_repost(repost_candidates[:15], linkedin_token, linkedin_person_urn)
+        return publish_direct_repost(
+            repost_candidates[:15],
+            linkedin_token,
+            linkedin_person_urn,
+            recent_parent_urns=recent_parent_urns,
+            cooldown_posts=repost_cooldown_posts,
+            history_file_path=repost_history_file,
+            history_max_entries=repost_history_max_entries,
+        )
 
     log("INFO", "Collecting candidates from RSS feeds and Hacker News...")
     candidates = collect_candidates()
