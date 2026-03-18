@@ -67,6 +67,19 @@ AI_KEYWORDS = (
     "deep learning",
 )
 
+TECH_KEYWORDS = (
+    "tech",
+    "technology",
+    "startup",
+    "software",
+    "platform",
+    "cloud",
+    "semiconductor",
+    "chip",
+    "cybersecurity",
+    "developer",
+)
+
 FINANCE_KEYWORDS = (
     "finance",
     "markets",
@@ -92,6 +105,39 @@ FINANCE_KEYWORDS = (
     "bond",
 )
 
+NEWS_EVENT_KEYWORDS = (
+    "announces",
+    "announced",
+    "launches",
+    "launch",
+    "rollout",
+    "release",
+    "agreement",
+    "partnership",
+    "acquires",
+    "acquisition",
+    "merger",
+    "funding",
+    "raises",
+    "policy",
+    "regulation",
+    "investigation",
+    "approval",
+    "earnings",
+    "ipo",
+)
+
+MARKET_RECAP_PATTERNS = (
+    r"\bstock market today\b",
+    r"\bmarket recap\b",
+    r"\bmarket wrap\b",
+    r"\bclosing bell\b",
+    r"\bpre[- ]market\b",
+    r"\bfutures (rise|rally|slip|fall|edge|tick|dip|mixed)\b",
+    r"\b(dow|nasdaq|s&p 500).*(futures|close|closed|slip|fall|rise|rally|mixed)\b",
+    r"\b(stocks|shares).*(rise|fall|mixed|edge|close|closed)\b",
+)
+
 BLOCKLIST_TERMS = (
     "kill",
     "killed",
@@ -108,6 +154,9 @@ TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
 WORD_RE = re.compile(r"[A-Za-z0-9#@'_-]+")
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+MARKET_RECAP_REGEXES = tuple(
+    re.compile(pattern, re.IGNORECASE) for pattern in MARKET_RECAP_PATTERNS
+)
 
 
 @dataclass
@@ -136,6 +185,11 @@ HOOKS = {
         "AI trend watch: this headline is moving quickly across major free feeds.",
         "Today in AI: this story is getting outsized attention in the latest cycle.",
         "Notable AI update: this item is surfacing repeatedly in current coverage.",
+    ],
+    "tech": [
+        "Tech trend watch: this headline is gaining traction across major coverage.",
+        "Today in tech: this development is drawing notable industry attention.",
+        "Notable tech update: this story is surfacing repeatedly in current reporting.",
     ],
     "finance": [
         "Finance trend watch: this market-focused headline is rising in visibility.",
@@ -255,12 +309,16 @@ def extract_google_news_target(url: str) -> str:
 def detect_topic(text: str) -> tuple[str, int]:
     ai_hits = keyword_hit_count(text, AI_KEYWORDS)
     finance_hits = keyword_hit_count(text, FINANCE_KEYWORDS)
+    tech_hits = keyword_hit_count(text, TECH_KEYWORDS)
+
     if ai_hits and finance_hits:
-        return "ai-finance", (ai_hits + finance_hits) * 9
+        return "ai-finance", (ai_hits + finance_hits + tech_hits) * 9
     if ai_hits:
-        return "ai", ai_hits * 9
+        return "ai", (ai_hits + tech_hits) * 9
     if finance_hits:
-        return "finance", finance_hits * 9
+        return "finance", (finance_hits + tech_hits) * 9
+    if tech_hits:
+        return "tech", tech_hits * 9
     return "general", 0
 
 
@@ -279,6 +337,30 @@ def contains_blocklisted_terms(text: str) -> bool:
     for term in BLOCKLIST_TERMS:
         pattern = rf"\b{re.escape(term)}\b"
         if re.search(pattern, lower_text):
+            return True
+    return False
+
+
+def is_market_recap(text: str) -> bool:
+    return any(regex.search(text) for regex in MARKET_RECAP_REGEXES)
+
+
+def topical_relevance_points(text: str) -> float:
+    event_hits = keyword_hit_count(text, NEWS_EVENT_KEYWORDS)
+    tech_hits = keyword_hit_count(text, TECH_KEYWORDS)
+    return float(event_hits * 5 + tech_hits * 3)
+
+
+def should_skip_for_recap(topic: str, text: str) -> bool:
+    if is_market_recap(text):
+        return True
+
+    # Avoid generic market movement recaps; prefer concrete finance/tech news events.
+    if topic == "finance":
+        event_hits = keyword_hit_count(text, NEWS_EVENT_KEYWORDS)
+        ai_hits = keyword_hit_count(text, AI_KEYWORDS)
+        tech_hits = keyword_hit_count(text, TECH_KEYWORDS)
+        if event_hits == 0 and ai_hits == 0 and tech_hits == 0:
             return True
     return False
 
@@ -307,13 +389,17 @@ def fetch_rss_candidates(source_name: str, feed_url: str, max_items: int = 20) -
         if source_name.startswith("Google News"):
             link = extract_google_news_target(link)
 
-        topic, keyword_points = detect_topic(f"{title} {summary_hint}")
+        combined_text = f"{title} {summary_hint}".lower()
+        topic, keyword_points = detect_topic(combined_text)
         if keyword_points == 0:
+            continue
+        if should_skip_for_recap(topic, combined_text):
             continue
 
         published_at = parse_datetime_from_entry(entry)
         score = (
             keyword_points
+            + topical_relevance_points(combined_text)
             + recency_points(published_at)
             + SOURCE_WEIGHTS.get(source_name, 10.0)
             + max(0.0, 20.0 - float(rank))
@@ -366,10 +452,14 @@ def fetch_hn_candidates(max_stories: int = 60) -> list[ArticleCandidate]:
             continue
 
         url = item.get("url") or f"https://news.ycombinator.com/item?id={story_id}"
-        topic, keyword_points = detect_topic(title)
+        text_preview = clean_text(str(item.get("text", "")))
+        combined_text = f"{title} {text_preview}".lower()
+        topic, keyword_points = detect_topic(combined_text)
         if keyword_points == 0:
             continue
-        if keyword_points < 18 and topic != "ai":
+        if should_skip_for_recap(topic, combined_text):
+            continue
+        if keyword_points < 18 and topic not in ("ai", "tech", "ai-finance"):
             continue
 
         hn_points = min(
@@ -381,7 +471,6 @@ def fetch_hn_candidates(max_stories: int = 60) -> list[ArticleCandidate]:
             if item.get("time")
             else None
         )
-        text_preview = clean_text(str(item.get("text", "")))
         summary_hint = (
             truncate_words(text_preview, 70)
             if text_preview
@@ -393,6 +482,7 @@ def fetch_hn_candidates(max_stories: int = 60) -> list[ArticleCandidate]:
 
         score = (
             keyword_points
+            + topical_relevance_points(combined_text)
             + hn_points
             + recency_points(published_at)
             + SOURCE_WEIGHTS["Hacker News"]
@@ -446,6 +536,8 @@ def choose_hook(topic: str) -> str:
 def choose_hashtags(topic: str) -> list[str]:
     if topic == "ai":
         pool = ["#AI", "#Tech", "#MachineLearning", "#GenAI", "#Innovation", "#DataScience"]
+    elif topic == "tech":
+        pool = ["#Tech", "#Innovation", "#Software", "#Startups", "#Cloud", "#AI"]
     elif topic == "finance":
         pool = ["#Finance", "#Tech", "#Markets", "#FinTech", "#Business", "#Economy"]
     elif topic == "ai-finance":

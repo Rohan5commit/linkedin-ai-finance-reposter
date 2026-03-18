@@ -45,13 +45,19 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Added blocklist terms in `main.py` to avoid violent/sensitive headlines being selected for reposting.
 - Reason: account is a neutral/professional repost bot.
 
-### C) LinkedIn identity endpoint fallback
+### C) Non-recap editorial filter
+
+- Added explicit market-recap exclusion patterns (daily futures/closing-bell style headlines).
+- Added event/news relevance weighting to prioritize substantive tech/AI/finance developments over routine market movement summaries.
+- Reason: target content should feel like meaningful industry/news updates, not generic market recap blurbs.
+
+### D) LinkedIn identity endpoint fallback
 
 - Token exchange worked, but `/v2/me` can return permission denial for some OAuth scope combinations.
 - Added fallback in bootstrap helper: if `/v2/me` fails, use `/v2/userinfo` and `sub` as member identifier.
 - URN normalization: `urn:li:person:<id_or_sub>`.
 
-### D) NVIDIA NIM over OpenAI
+### E) NVIDIA NIM over OpenAI
 
 - Switched summarization integration from OpenAI to NVIDIA NIM per user preference.
 - If NIM key is absent or call fails, deterministic local fallback summary remains active.
@@ -116,4 +122,3 @@ python src/bootstrap_linkedin_secrets.py \
 1. Keep token freshness checks in mind before scheduled runs.
 2. Optionally add a lightweight token-health precheck before attempting post.
 3. Consider updating workflow action versions when Node 24-compatible updates are available.
-

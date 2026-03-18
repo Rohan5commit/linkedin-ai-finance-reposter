@@ -11,6 +11,7 @@ Python automation that fetches trending AI and finance news from free sources an
   - Google News RSS (AI and finance filters)
   - Yahoo Finance RSS
 - Scores each candidate by relevance, recency, and source signals.
+- Filters out generic market-recap style headlines (e.g., daily futures/closing summaries).
 - Picks one top trending/relevant article per run.
 - Builds a neutral, professional LinkedIn post:
   - engaging hook
