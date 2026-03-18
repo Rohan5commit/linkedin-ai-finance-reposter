@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import parse_qs, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urljoin, urlparse
 
 import feedparser
 import requests
@@ -29,8 +29,26 @@ LINKEDIN_MAX_MEDIA_TITLE_CHARS = 200
 LINKEDIN_MAX_MEDIA_DESC_CHARS = 256
 HN_TOP_STORIES_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
 HN_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
-LINKEDIN_API_URL = "https://api.linkedin.com/v2/ugcPosts"
+LINKEDIN_UGC_API_URL = "https://api.linkedin.com/v2/ugcPosts"
+LINKEDIN_POSTS_API_URL = "https://api.linkedin.com/rest/posts"
+LINKEDIN_API_VERSION = "202510"
 NVIDIA_NIM_CHAT_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+DIRECT_REPOST_RESULT_LIMIT = 20
+
+DIRECT_REPOST_QUERIES = [
+    (
+        "ai",
+        'site:linkedin.com/posts ("artificial intelligence" OR AI OR GenAI OR LLM) (launch OR product OR funding OR finance OR technology)',
+    ),
+    (
+        "finance",
+        'site:linkedin.com/posts (finance OR fintech OR markets OR banking) (AI OR technology OR startup)',
+    ),
+    (
+        "tech",
+        'site:linkedin.com/posts (technology OR startup OR software OR semiconductor OR cloud) (AI OR finance)',
+    ),
+]
 
 RSS_SOURCES = [
     ("TechCrunch AI", "https://techcrunch.com/tag/artificial-intelligence/feed/"),
@@ -175,6 +193,16 @@ class ArticleCandidate:
     topic: str
     score: float
     preview_image_url: Optional[str] = None
+
+
+@dataclass
+class RepostCandidate:
+    title: str
+    url: str
+    source: str
+    topic: str
+    score: float
+    parent_urn_candidates: list[str]
 
 
 @dataclass(frozen=True)
@@ -401,6 +429,148 @@ def extract_google_news_target(url: str) -> str:
     if "url" in query_params and query_params["url"]:
         return unquote(query_params["url"][0])
     return url
+
+
+def unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique_values: list[str] = []
+    for value in values:
+        if value not in seen:
+            unique_values.append(value)
+            seen.add(value)
+    return unique_values
+
+
+def normalize_linkedin_post_url(url: str) -> str:
+    cleaned = html.unescape(url).strip().split("&rut=", 1)[0]
+    parsed = urlparse(cleaned)
+    if not parsed.scheme or not parsed.netloc:
+        return cleaned
+
+    filtered_query: list[tuple[str, str]] = []
+    for key, values in parse_qs(parsed.query, keep_blank_values=True).items():
+        if key.lower().startswith("utm_") or key.lower() == "trk":
+            continue
+        for value in values:
+            filtered_query.append((key, value))
+
+    query = urlencode(filtered_query)
+    normalized_path = re.sub(r"/+$", "", parsed.path) or parsed.path
+    normalized = parsed._replace(query=query, fragment="", path=normalized_path)
+    return normalized.geturl()
+
+
+def extract_parent_urn_candidates_from_url(post_url: str) -> list[str]:
+    urns: list[str] = []
+    for urn_type, urn_id in re.findall(r"urn:li:(share|ugcPost|activity):([A-Za-z0-9_-]+)", post_url):
+        urns.append(f"urn:li:{urn_type}:{urn_id}")
+
+    activity_match = re.search(r"activity-(\d+)", post_url)
+    if not activity_match:
+        activity_match = re.search(r"urn:li:activity:(\d+)", post_url)
+    if activity_match:
+        activity_id = activity_match.group(1)
+        urns.extend(
+            [
+                f"urn:li:share:{activity_id}",
+                f"urn:li:ugcPost:{activity_id}",
+                f"urn:li:activity:{activity_id}",
+            ]
+        )
+
+    return unique_preserve_order(urns)
+
+
+def build_title_from_linkedin_post_url(post_url: str) -> str:
+    path = urlparse(post_url).path
+    slug_match = re.search(r"/posts/([^/?#]+)", path)
+    if not slug_match:
+        return "Trending LinkedIn post"
+
+    slug = slug_match.group(1)
+    cleaned = re.sub(r"-activity-\d+.*$", "", slug)
+    cleaned = cleaned.replace("_", " ")
+    cleaned = re.sub(r"[-]+", " ", cleaned)
+    cleaned = SPACE_RE.sub(" ", cleaned).strip()
+    if not cleaned:
+        return "Trending LinkedIn post"
+
+    # Keep readable but concise for commentary text.
+    return truncate_words(cleaned, 18)
+
+
+def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RESULT_LIMIT) -> list[RepostCandidate]:
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; linkedin-ai-finance-reposter/1.0)"}
+    redirect_regex = re.compile(r"http://duckduckgo\.com/l/\?uddg=([^)\s&]+)", re.IGNORECASE)
+
+    candidates_by_urn: dict[str, RepostCandidate] = {}
+
+    for query_topic, query_text in DIRECT_REPOST_QUERIES:
+        query_url = (
+            "https://r.jina.ai/http://duckduckgo.com/html/?q="
+            + quote_plus(query_text)
+        )
+        try:
+            response = requests.get(
+                query_url,
+                timeout=REQUEST_TIMEOUT,
+                headers=headers,
+            )
+            response.raise_for_status()
+        except requests.RequestException as error:
+            log("WARN", f"DuckDuckGo query failed for topic '{query_topic}' ({error})")
+            continue
+
+        collected_for_query = 0
+        for rank, match in enumerate(redirect_regex.finditer(response.text), start=1):
+            if collected_for_query >= max_items_per_query:
+                break
+
+            target_url = normalize_linkedin_post_url(unquote(match.group(1)))
+            lower_target = target_url.lower()
+            if "linkedin.com/posts/" not in lower_target and "linkedin.com/feed/update/" not in lower_target:
+                continue
+
+            parent_urn_candidates = extract_parent_urn_candidates_from_url(target_url)
+            if not parent_urn_candidates:
+                continue
+
+            title = build_title_from_linkedin_post_url(target_url)
+            if contains_blocklisted_terms(title):
+                continue
+
+            combined_text = f"{title} {query_text}".lower()
+            topic, keyword_points = detect_topic(combined_text)
+            if topic == "general":
+                topic = query_topic
+            if should_skip_for_recap(topic, combined_text):
+                continue
+
+            primary_urn = parent_urn_candidates[0]
+            if primary_urn in candidates_by_urn:
+                candidates_by_urn[primary_urn].score += 8.0
+                continue
+
+            score = (
+                float(keyword_points)
+                + topical_relevance_points(combined_text)
+                + max(0.0, 36.0 - float(rank))
+                + 18.0
+            )
+            candidates_by_urn[primary_urn] = RepostCandidate(
+                title=title,
+                url=target_url,
+                source=f"DuckDuckGo Search ({query_topic})",
+                topic=topic,
+                score=score,
+                parent_urn_candidates=parent_urn_candidates,
+            )
+            collected_for_query += 1
+
+        log("INFO", f"DuckDuckGo ({query_topic}): collected {collected_for_query} repost candidates")
+
+    ranked = sorted(candidates_by_urn.values(), key=lambda candidate: candidate.score, reverse=True)
+    return ranked
 
 
 def detect_topic(text: str) -> tuple[str, int]:
@@ -670,6 +840,17 @@ def choose_hashtags(topic: str) -> list[str]:
     return selected[:5]
 
 
+def build_direct_reshare_commentary(candidate: RepostCandidate) -> str:
+    hook = choose_hook(candidate.topic)
+    hashtags = choose_hashtags(candidate.topic)
+    commentary = (
+        f"{hook}\n\n"
+        f"Direct repost signal: {candidate.title}\n\n"
+        f"{' '.join(hashtags)}"
+    )
+    return truncate_chars(commentary, LINKEDIN_MAX_POST_CHARS)
+
+
 def append_clause(sentence: str, clause: str) -> str:
     trimmed = sentence.rstrip().rstrip(".")
     return f"{trimmed}; {clause.rstrip('.')}."
@@ -875,6 +1056,75 @@ def normalize_person_urn(raw_person_urn: str) -> str:
     return f"urn:li:person:{value}"
 
 
+def post_direct_reshare(
+    commentary: str,
+    parent_urn: str,
+    token: str,
+    person_urn: str,
+) -> requests.Response:
+    payload = {
+        "author": normalize_person_urn(person_urn),
+        "commentary": commentary,
+        "visibility": "PUBLIC",
+        "distribution": {
+            "feedDistribution": "MAIN_FEED",
+            "targetEntities": [],
+            "thirdPartyDistributionChannels": [],
+        },
+        "lifecycleState": "PUBLISHED",
+        "isReshareDisabledByAuthor": False,
+        "reshareContext": {"parent": parent_urn},
+    }
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Restli-Protocol-Version": "2.0.0",
+        "Linkedin-Version": LINKEDIN_API_VERSION,
+        "Content-Type": "application/json",
+    }
+    return requests.post(
+        LINKEDIN_POSTS_API_URL,
+        json=payload,
+        headers=headers,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
+def publish_direct_repost(
+    candidates: list[RepostCandidate],
+    token: str,
+    person_urn: str,
+) -> int:
+    last_error_body = ""
+    for candidate in candidates:
+        commentary = build_direct_reshare_commentary(candidate)
+        for parent_urn in candidate.parent_urn_candidates:
+            log(
+                "INFO",
+                f"Trying direct repost: topic={candidate.topic} | parent={parent_urn} | title='{candidate.title}'",
+            )
+            try:
+                response = post_direct_reshare(commentary, parent_urn, token, person_urn)
+            except requests.RequestException as error:
+                log("WARN", f"Direct repost request failed ({error})")
+                last_error_body = str(error)
+                continue
+
+            if response.status_code in (200, 201):
+                log("INFO", f"Direct repost created successfully via parent={parent_urn}.")
+                print(response.text)
+                return 0
+
+            log("WARN", f"Direct repost failed for parent={parent_urn} with HTTP {response.status_code}")
+            if response.text:
+                log("WARN", truncate_chars(clean_text(response.text), 350))
+            last_error_body = response.text
+
+    log("ERROR", "Could not create a direct repost from discovered LinkedIn posts.")
+    if last_error_body:
+        print(last_error_body)
+    return 1
+
+
 def post_to_linkedin(
     post_text: str,
     candidate: ArticleCandidate,
@@ -914,7 +1164,7 @@ def post_to_linkedin(
         "Content-Type": "application/json",
     }
     return requests.post(
-        LINKEDIN_API_URL,
+        LINKEDIN_UGC_API_URL,
         json=payload,
         headers=headers,
         timeout=REQUEST_TIMEOUT,
@@ -939,6 +1189,40 @@ def main() -> int:
     load_dotenv()
     if args.seed is not None:
         random.seed(args.seed)
+    is_dry_run = args.dry_run or os.getenv("DRY_RUN", "").strip().lower() == "true"
+    direct_repost_only = os.getenv("LINKEDIN_DIRECT_REPOST_ONLY", "true").strip().lower() != "false"
+
+    if direct_repost_only:
+        log("INFO", "Direct repost mode enabled. Discovering public LinkedIn posts...")
+        repost_candidates = fetch_linkedin_repost_candidates()
+        if not repost_candidates:
+            log("WARN", "No repostable LinkedIn post candidates found; skipping this run.")
+            return 0
+
+        top_candidate = repost_candidates[0]
+        top_commentary = build_direct_reshare_commentary(top_candidate)
+        log(
+            "INFO",
+            f"Top direct repost candidate: '{top_candidate.title}' ({top_candidate.source}) | "
+            f"score={top_candidate.score:.1f} | urn_options={len(top_candidate.parent_urn_candidates)}",
+        )
+
+        if is_dry_run:
+            print("\n--- Direct Repost Preview ---\n")
+            print(top_commentary)
+            print(f"\nSource post URL: {top_candidate.url}")
+            print("Parent URN attempts:")
+            for parent_urn in top_candidate.parent_urn_candidates:
+                print(f"- {parent_urn}")
+            return 0
+
+        linkedin_token = os.getenv("LINKEDIN_TOKEN", "").strip()
+        linkedin_person_urn = os.getenv("LINKEDIN_PERSON_URN", "").strip()
+        if not linkedin_token or not linkedin_person_urn:
+            log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
+            return 1
+
+        return publish_direct_repost(repost_candidates[:15], linkedin_token, linkedin_person_urn)
 
     log("INFO", "Collecting candidates from RSS feeds and Hacker News...")
     candidates = collect_candidates()
@@ -957,7 +1241,7 @@ def main() -> int:
         f"image_preview={'yes' if selected.preview_image_url else 'no'}",
     )
 
-    if args.dry_run or os.getenv("DRY_RUN", "").strip().lower() == "true":
+    if is_dry_run:
         print("\n--- LinkedIn Post Preview ---\n")
         print(post_text)
         return 0

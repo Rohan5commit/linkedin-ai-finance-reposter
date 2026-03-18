@@ -1,31 +1,16 @@
 # LinkedIn AI + Finance Auto-Reposter
 
-Python automation that fetches trending AI and finance news from free sources and reposts one top story to LinkedIn twice a week using GitHub Actions.
+Python automation that discovers public AI/tech/finance LinkedIn posts and creates a **direct repost** on your profile twice a week using GitHub Actions.
 
 ## What this repository does
 
-- Pulls candidates from free sources:
-  - TechCrunch AI RSS
-  - Reuters Finance RSS (plus Reuters-targeted RSS fallback if Reuters blocks direct feed access)
-  - Hacker News API (top stories)
-  - Google News RSS (AI and finance filters)
-  - Yahoo Finance RSS
-- Scores each candidate by relevance, recency, and source signals.
-- Filters out generic market-recap style headlines (e.g., daily futures/closing summaries).
-- Picks one top trending/relevant article per run.
-- Prefers candidates with discoverable preview-image metadata (Open Graph / Twitter image tags) for richer LinkedIn rendering.
-- Enforces LinkedIn commentary length limit (max 3000 chars) before posting.
-- Builds a neutral, professional LinkedIn post:
-  - engaging hook
-  - headline line
-  - 2-3 sentence summary
-  - source link
-  - 3-5 relevant hashtags
-- Publishes as an **ARTICLE share** via LinkedIn `ugcPosts`, so the post appears as a repost-style link card (with image preview when available).
-- Randomly alternates between:
-  - short posts: 150-300 words
-  - long posts: 400-600 words
-- Posts directly to LinkedIn via `ugcPosts`.
+- Discovers candidate public LinkedIn posts via free web search (`duckduckgo.com/html`) constrained to `linkedin.com/posts` and AI/tech/finance queries.
+- Extracts candidate parent URNs from LinkedIn post URLs (`activity`, `share`, `ugcPost` variants).
+- Filters and ranks candidates for topical relevance and recency-style search ranking.
+- Publishes a **true direct repost** via LinkedIn Posts API (`POST /rest/posts`) using `reshareContext.parent`.
+- Adds short professional commentary + hashtags to improve feed engagement while still being a direct repost.
+- Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
+- Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
 
 ## Repository structure
 
@@ -53,7 +38,7 @@ In your fork: **Settings → Secrets and variables → Actions → New repositor
 
 - `LINKEDIN_TOKEN` = your LinkedIn user access token with posting scope
 - `LINKEDIN_PERSON_URN` = your person URN (example: `urn:li:person:abc123...`)
-- `NVIDIA_NIM_API_KEY` = your NVIDIA NIM API key (optional; fallback summarizer is used when absent)
+- `NVIDIA_NIM_API_KEY` = optional, only used when `LINKEDIN_DIRECT_REPOST_ONLY=false` (legacy summary mode)
 
 ### Fast local bootstrap (recommended)
 
@@ -122,7 +107,7 @@ urn:li:person:<id_or_sub>
 
 8. Save `LINKEDIN_TOKEN` and `LINKEDIN_PERSON_URN` in GitHub Actions secrets.
 
-## 4) Get NVIDIA NIM API key (optional AI summarization)
+## 4) Get NVIDIA NIM API key (optional, legacy summary mode only)
 
 1. Sign in at <https://build.nvidia.com/> (or NVIDIA API catalog).
 2. Generate an API key.
@@ -131,7 +116,7 @@ urn:li:person:<id_or_sub>
    - Workflow env: `NIM_MODEL`
    - Local `.env`: `NIM_MODEL=meta/llama-3.1-8b-instruct`
 
-If no NIM key is set, the bot uses deterministic local summarization automatically.
+If no NIM key is set, the legacy summary mode uses deterministic local summarization automatically.
 
 ## 5) Schedule and execution
 
@@ -156,13 +141,18 @@ cp .env.example .env
 python src/main.py --dry-run
 ```
 
-`--dry-run` fetches/scoring/generates post content but does not publish to LinkedIn.
+`--dry-run` discovers/ranks repost candidates and prints the repost commentary + parent URN attempts without publishing.
+
+Mode switch:
+
+- `LINKEDIN_DIRECT_REPOST_ONLY=true` (default): true direct repost path
+- `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
 
 ## Error handling behavior
 
-- If no relevant article is found, the run is skipped with a warning and exits successfully.
-- If no image metadata is discovered in top candidates, the bot still posts the best-ranked article link (LinkedIn may still render a link card image).
-- If LinkedIn API posting fails, the script prints the API error body and exits non-zero, so the GitHub Action is marked failed.
+- In legacy article mode, if no relevant article is found, the run is skipped with a warning and exits successfully.
+- If no repostable LinkedIn post candidates are found, the run is skipped with a warning and exits successfully.
+- If all repost attempts fail (invalid parent/private post/permissions), the script prints the last API error body and exits non-zero, so GitHub Actions marks the run as failed.
 
 ## Notes
 

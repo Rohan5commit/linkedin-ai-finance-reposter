@@ -31,6 +31,7 @@ jobs:
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
           NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
           NIM_MODEL: meta/llama-3.1-8b-instruct
+          LINKEDIN_DIRECT_REPOST_ONLY: "true"
         run: python src/main.py
 
       - name: Success log

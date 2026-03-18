@@ -11,7 +11,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - LinkedIn bootstrap helper: `src/bootstrap_linkedin_secrets.py`
 - Workflow: `.github/workflows/post.yml`
 - Schedule: Tuesday + Friday at 09:00 UTC (`0 9 * * 2,5`)
-- Last verified manual workflow run: `23226222725` (**success**, article card mode)
+- Last verified manual workflow run: `23226222725` (**success**, article card mode; superseded by direct-repost requirement)
 
 ## 2) What was implemented (chronological)
 
@@ -35,6 +35,8 @@ It records **what was done**, **why those choices were made**, and **what to do 
 10. Switched LinkedIn payload from text-only posts to ARTICLE shares with link cards.
 11. Added image-first candidate preference by detecting OG/Twitter image metadata from feeds/pages.
 12. Live-validated article-card posting after the change (`share urn:li:share:7439860186632101888`).
+13. Added true direct-repost mode using LinkedIn Posts API (`/rest/posts` + `reshareContext.parent`) with default `LINKEDIN_DIRECT_REPOST_ONLY=true`.
+14. Added public LinkedIn post discovery via DuckDuckGo HTML search and URN extraction from post URLs.
 
 ## 3) Key decisions and rationale
 
@@ -75,6 +77,13 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - User asked for repost-like output with images rather than plain market recap text.
 - Updated `ugcPosts` payload to use `shareMediaCategory: ARTICLE` and attach `originalUrl` media.
 - Added image-preference scoring (feed media metadata + OG/Twitter image discovery from top candidates) to bias selections toward links that render with preview images on LinkedIn.
+
+### H) True direct repost requirement
+
+- User clarified that ARTICLE shares were still not acceptable; they wanted an actual LinkedIn repost.
+- Implemented direct repost path through `POST /rest/posts` with `reshareContext.parent`.
+- Since member-feed APIs are restricted, discovery now uses free public search (DuckDuckGo HTML) for `linkedin.com/posts` URLs and derives candidate parent URNs (`share`, `ugcPost`, `activity`) from URL activity IDs.
+- Publisher retries multiple URN variants and multiple candidates before failing.
 
 ## 4) Secrets and credentials model
 
