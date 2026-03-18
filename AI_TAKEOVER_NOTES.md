@@ -10,7 +10,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Core automation script: `src/main.py`
 - LinkedIn bootstrap helper: `src/bootstrap_linkedin_secrets.py`
 - Workflow: `.github/workflows/post.yml`
-- Schedule: Tuesday + Friday at 09:00 UTC (`0 9 * * 2,5`)
+- Schedule trigger: daily at 09:00 UTC (`0 9 * * *`) with in-script weekly random-day gate (2 days/week)
 - Last successful manual workflow run: `23226222725` (**success**, article card mode)
 - Latest direct-repost validation runs:
   - `23226616001`, `23226692481`, `23226778661` (**failed**, 403 on all attempts before parent URN resolver fix)
@@ -43,6 +43,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 14. Added public LinkedIn post discovery via DuckDuckGo HTML search and URN extraction from post URLs.
 15. Added page-metadata parent URN resolver (extract `share`/`ugcPost` URNs from public post HTML and rank vs activity ID), which unlocked successful third-party direct reposts.
 16. Added compatibility fallback from `/rest/posts` reshare to `ugcPosts` response-context reshare; latest success used this fallback path.
+17. Replaced fixed Tue/Fri cadence with weekly random day selection (2 random days chosen per ISO week, deterministic from seed).
 
 ## 3) Key decisions and rationale
 
@@ -90,6 +91,12 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Implemented direct repost path through `POST /rest/posts` with `reshareContext.parent`.
 - Since member-feed APIs are restricted, discovery now uses free public search (DuckDuckGo HTML via `r.jina.ai`) for `linkedin.com/posts` URLs and derives candidate parent URNs (`share`, `ugcPost`) from URL activity IDs.
 - Publisher retries multiple URN variants and multiple candidates before failing.
+
+### I) Random weekly schedule (2 days)
+
+- User requested non-fixed weekdays.
+- Workflow now triggers daily at 09:00 UTC, and Python gate decides whether today is one of this week's 2 random selected days.
+- Day selection is deterministic per ISO week using `RANDOM_SCHEDULE_SEED`, avoiding drift/re-randomization within the same week.
 
 ## 4) Secrets and credentials model
 

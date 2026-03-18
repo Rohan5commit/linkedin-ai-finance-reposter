@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import os
 import random
@@ -214,6 +215,7 @@ class LengthProfile:
 
 SHORT_PROFILE = LengthProfile(name="short", min_words=150, max_words=300)
 LONG_PROFILE = LengthProfile(name="long", min_words=400, max_words=600)
+WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 HOOKS = {
     "ai": [
@@ -287,6 +289,14 @@ FINANCE_CLAUSES = [
 def log(level: str, message: str) -> None:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
     print(f"[{timestamp}] [{level}] {message}")
+
+
+def weekly_random_run_days(seed_material: str, now_utc: datetime) -> list[int]:
+    iso_year, iso_week, _ = now_utc.isocalendar()
+    week_key = f"{seed_material}:{iso_year}-W{iso_week}"
+    digest = hashlib.sha256(week_key.encode("utf-8")).hexdigest()
+    rng = random.Random(int(digest[:16], 16))
+    return sorted(rng.sample(list(range(7)), 2))
 
 
 def clean_text(raw: str) -> str:
@@ -1333,6 +1343,11 @@ def main() -> int:
         default=None,
         help="Optional random seed for deterministic local testing.",
     )
+    parser.add_argument(
+        "--ignore-random-schedule",
+        action="store_true",
+        help="Run immediately even if today's scheduled random weekday gate would skip.",
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -1340,6 +1355,26 @@ def main() -> int:
         random.seed(args.seed)
     is_dry_run = args.dry_run or os.getenv("DRY_RUN", "").strip().lower() == "true"
     direct_repost_only = os.getenv("LINKEDIN_DIRECT_REPOST_ONLY", "true").strip().lower() != "false"
+    randomize_weekly_run_days = os.getenv("RANDOMIZE_WEEKLY_RUN_DAYS", "true").strip().lower() != "false"
+    event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower()
+
+    if randomize_weekly_run_days and event_name == "schedule" and not args.ignore_random_schedule:
+        now_utc = datetime.now(timezone.utc)
+        seed_material = (
+            os.getenv("RANDOM_SCHEDULE_SEED", "").strip()
+            or os.getenv("GITHUB_REPOSITORY", "").strip()
+            or "linkedin-ai-finance-reposter"
+        )
+        selected_days = weekly_random_run_days(seed_material, now_utc)
+        today = now_utc.weekday()
+        selected_day_labels = [WEEKDAY_NAMES[day] for day in selected_days]
+        log(
+            "INFO",
+            f"Weekly random schedule days: {', '.join(selected_day_labels)} | today={WEEKDAY_NAMES[today]}",
+        )
+        if today not in selected_days:
+            log("INFO", "Today is not one of this week's selected random run days; skipping.")
+            return 0
 
     if direct_repost_only:
         log("INFO", "Direct repost mode enabled. Discovering public LinkedIn posts...")

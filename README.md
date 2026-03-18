@@ -126,7 +126,8 @@ If no NIM key is set, the legacy summary mode uses deterministic local summariza
 
 Workflow file: `.github/workflows/post.yml`
 
-- Runs at **09:00 UTC** on **Tuesday and Friday** (`cron: 0 9 * * 2,5`)
+- Workflow triggers **daily at 09:00 UTC** (`cron: 0 9 * * *`)
+- The Python script then selects **2 random days per ISO week** (deterministic for that week) and only posts on those two days
 - Also supports manual run via **workflow_dispatch**
 
 Workflow steps:
@@ -142,7 +143,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python src/main.py --dry-run
+python src/main.py --dry-run --ignore-random-schedule
 ```
 
 `--dry-run` discovers/ranks repost candidates and prints the repost commentary + parent URN attempts without publishing.
@@ -151,6 +152,8 @@ Mode switch:
 
 - `LINKEDIN_DIRECT_REPOST_ONLY=true` (default): true direct repost path
 - `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
+- `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce 2-random-days-per-week gate on scheduled runs
+- `RANDOM_SCHEDULE_SEED=<string>`: changes which two days are selected each week
 
 ## Error handling behavior
 
