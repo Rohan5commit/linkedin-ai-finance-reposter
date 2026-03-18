@@ -44,6 +44,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 15. Added page-metadata parent URN resolver (extract `share`/`ugcPost` URNs from public post HTML and rank vs activity ID), which unlocked successful third-party direct reposts.
 16. Added compatibility fallback from `/rest/posts` reshare to `ugcPosts` response-context reshare; latest success used this fallback path.
 17. Replaced fixed Tue/Fri cadence with weekly random day selection (2 random days chosen per ISO week, deterministic from seed).
+18. Added fallback candidate source: curated public LinkedIn post URL list used when live search discovery is unavailable.
 
 ## 3) Key decisions and rationale
 
@@ -114,6 +115,7 @@ No secrets are stored in committed files.
 2. GitHub Actions currently shows Node 20 deprecation annotations for `actions/checkout@v4` and `actions/setup-python@v5`. Track updates.
 3. Reuters direct feed failures are expected in some environments; fallback path is intentional.
 4. Direct repost now works with page-derived parent URNs + API fallback. Keep the 403 diagnostic in place because permissions/target visibility can still cause failures on specific posts.
+5. Search discovery via `r.jina.ai` can intermittently return HTTP 451; fallback URL list is in place to avoid full-run skips.
 
 ## 6) Useful operational commands
 

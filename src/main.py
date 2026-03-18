@@ -51,6 +51,15 @@ DIRECT_REPOST_QUERIES = [
     ),
 ]
 
+FALLBACK_LINKEDIN_POST_URLS = [
+    "https://www.linkedin.com/posts/chintanzalani_state-of-ai-startup-funding-february-2026-activity-7436787925322715136-7rNJ",
+    "https://www.linkedin.com/posts/siemenssoftware_news-alert-were-excited-to-announce-activity-7424813993317371904-YROH",
+    "https://www.linkedin.com/posts/benreitzes_melius-ben-reitzes-on-how-ai-is-eating-software-activity-7417990754007965696-Q5CB",
+    "https://www.linkedin.com/posts/abhineetsing_ai-fintech-banking-activity-7370104749267841024-kl2J",
+    "https://www.linkedin.com/posts/bluematrix_fintech-capitalmarkets-ai-activity-7391623403679670272-jFws",
+    "https://www.linkedin.com/posts/dsac-danang_startup-ai-semiconductor-activity-7302185610578968576-Yh6C",
+]
+
 RSS_SOURCES = [
     ("TechCrunch AI", "https://techcrunch.com/tag/artificial-intelligence/feed/"),
     ("Reuters Finance", "https://feeds.reuters.com/reuters/businessNews"),
@@ -642,7 +651,31 @@ def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RE
         log("INFO", f"DuckDuckGo ({query_topic}): collected {collected_for_query} repost candidates")
 
     ranked = sorted(candidates_by_urn.values(), key=lambda candidate: candidate.score, reverse=True)
-    return ranked
+    if ranked:
+        return ranked
+
+    fallback_candidates: list[RepostCandidate] = []
+    for index, post_url in enumerate(FALLBACK_LINKEDIN_POST_URLS):
+        title = build_title_from_linkedin_post_url(post_url)
+        topic, _ = detect_topic(title.lower())
+        if topic == "general":
+            topic = "ai-finance"
+        fallback_candidates.append(
+            RepostCandidate(
+                title=title,
+                url=post_url,
+                source="Fallback LinkedIn URL List",
+                topic=topic,
+                score=40.0 - float(index),
+                parent_urn_candidates=extract_parent_urn_candidates_from_url(post_url),
+            )
+        )
+
+    log(
+        "WARN",
+        "Search discovery returned no repost candidates; falling back to curated public LinkedIn post URLs.",
+    )
+    return fallback_candidates
 
 
 def detect_topic(text: str) -> tuple[str, int]:
