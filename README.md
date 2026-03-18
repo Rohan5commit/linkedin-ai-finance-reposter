@@ -65,6 +65,8 @@ It opens LinkedIn auth in your browser, captures callback locally, exchanges tok
 - `LINKEDIN_TOKEN`
 - `LINKEDIN_PERSON_URN`
 
+If `/v2/me` is not permitted for your token, the script automatically falls back to `/v2/userinfo` and uses `sub`.
+
 ## 3) Get a LinkedIn API token and person URN
 
 1. Create a LinkedIn app: <https://www.linkedin.com/developers/apps>
@@ -99,10 +101,18 @@ curl -sS \
   https://api.linkedin.com/v2/me
 ```
 
-7. Convert the returned `id` to person URN:
+If that returns permission errors, use:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer <LINKEDIN_TOKEN>" \
+  https://api.linkedin.com/v2/userinfo
+```
+
+7. Convert the returned identifier to person URN:
 
 ```text
-urn:li:person:<id>
+urn:li:person:<id_or_sub>
 ```
 
 8. Save `LINKEDIN_TOKEN` and `LINKEDIN_PERSON_URN` in GitHub Actions secrets.

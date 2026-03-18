@@ -21,6 +21,7 @@ import requests
 
 TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 ME_URL = "https://api.linkedin.com/v2/me"
+USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
 DEFAULT_REDIRECT_URI = "http://localhost:8080/callback"
 DEFAULT_SCOPE = "openid profile w_member_social"
 
@@ -119,18 +120,30 @@ def exchange_token(code: str, redirect_uri: str, client_id: str, client_secret: 
 
 
 def fetch_person_urn(access_token: str) -> str:
-    response = requests.get(
-        ME_URL,
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=20,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(f"/v2/me failed ({response.status_code}): {response.text[:500]}")
-    data = response.json()
-    member_id = data.get("id", "")
-    if not member_id:
-        raise RuntimeError(f"/v2/me response missing id: {json.dumps(data)}")
-    return f"urn:li:person:{member_id}"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    # Preferred path if token has legacy /v2/me permission.
+    response = requests.get(ME_URL, headers=headers, timeout=20)
+    if response.status_code < 400:
+        data = response.json()
+        member_id = data.get("id", "")
+        if member_id:
+            return f"urn:li:person:{member_id}"
+
+    # Fallback for OIDC tokens where /v2/userinfo is available and /v2/me is denied.
+    userinfo = requests.get(USERINFO_URL, headers=headers, timeout=20)
+    if userinfo.status_code >= 400:
+        raise RuntimeError(
+            "Failed to fetch member identity from both /v2/me and /v2/userinfo. "
+            f"/v2/me={response.status_code}, /v2/userinfo={userinfo.status_code}. "
+            f"userinfo_body={userinfo.text[:500]}"
+        )
+
+    userinfo_data = userinfo.json()
+    subject = userinfo_data.get("sub", "")
+    if not subject:
+        raise RuntimeError(f"/v2/userinfo response missing sub: {json.dumps(userinfo_data)}")
+    return f"urn:li:person:{subject}"
 
 
 def detect_repo() -> Optional[str]:
