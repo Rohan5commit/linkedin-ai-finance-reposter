@@ -32,6 +32,8 @@ It records **what was done**, **why those choices were made**, and **what to do 
 7. Replaced OpenAI summarization path with NVIDIA NIM support.
 8. Added one-command LinkedIn secret bootstrap helper script.
 9. Completed live token setup and validated successful workflow execution.
+10. Switched LinkedIn payload from text-only posts to ARTICLE shares with link cards.
+11. Added image-first candidate preference by detecting OG/Twitter image metadata from feeds/pages.
 
 ## 3) Key decisions and rationale
 
@@ -66,6 +68,12 @@ It records **what was done**, **why those choices were made**, and **what to do 
 
 - Added strict post-length enforcement so final `shareCommentary.text` is always <= 3000 characters.
 - Reason: LinkedIn `ugcPosts` rejects payloads above 3000 chars with HTTP 400.
+
+### G) Repost-style output with images
+
+- User asked for repost-like output with images rather than plain market recap text.
+- Updated `ugcPosts` payload to use `shareMediaCategory: ARTICLE` and attach `originalUrl` media.
+- Added image-preference scoring (feed media metadata + OG/Twitter image discovery from top candidates) to bias selections toward links that render with preview images on LinkedIn.
 
 ## 4) Secrets and credentials model
 

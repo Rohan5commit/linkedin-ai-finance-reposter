@@ -13,12 +13,15 @@ Python automation that fetches trending AI and finance news from free sources an
 - Scores each candidate by relevance, recency, and source signals.
 - Filters out generic market-recap style headlines (e.g., daily futures/closing summaries).
 - Picks one top trending/relevant article per run.
+- Prefers candidates with discoverable preview-image metadata (Open Graph / Twitter image tags) for richer LinkedIn rendering.
 - Enforces LinkedIn commentary length limit (max 3000 chars) before posting.
 - Builds a neutral, professional LinkedIn post:
   - engaging hook
+  - headline line
   - 2-3 sentence summary
   - source link
   - 3-5 relevant hashtags
+- Publishes as an **ARTICLE share** via LinkedIn `ugcPosts`, so the post appears as a repost-style link card (with image preview when available).
 - Randomly alternates between:
   - short posts: 150-300 words
   - long posts: 400-600 words
@@ -158,6 +161,7 @@ python src/main.py --dry-run
 ## Error handling behavior
 
 - If no relevant article is found, the run is skipped with a warning and exits successfully.
+- If no image metadata is discovered in top candidates, the bot still posts the best-ranked article link (LinkedIn may still render a link card image).
 - If LinkedIn API posting fails, the script prints the API error body and exits non-zero, so the GitHub Action is marked failed.
 
 ## Notes

@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import feedparser
 import requests
@@ -22,6 +22,11 @@ from dotenv import load_dotenv
 USER_AGENT = "linkedin-ai-finance-reposter/1.0"
 REQUEST_TIMEOUT = 20
 LINKEDIN_MAX_POST_CHARS = 3000
+LINKEDIN_MEDIA_SCAN_LIMIT = 8
+LINKEDIN_MEDIA_IMAGE_BONUS = 14.0
+LINKEDIN_MEDIA_TIMEOUT = 8
+LINKEDIN_MAX_MEDIA_TITLE_CHARS = 200
+LINKEDIN_MAX_MEDIA_DESC_CHARS = 256
 HN_TOP_STORIES_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
 HN_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
 LINKEDIN_API_URL = "https://api.linkedin.com/v2/ugcPosts"
@@ -169,6 +174,7 @@ class ArticleCandidate:
     published_at: Optional[datetime]
     topic: str
     score: float
+    preview_image_url: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -300,6 +306,88 @@ def parse_datetime_from_entry(entry: feedparser.FeedParserDict) -> Optional[date
     return None
 
 
+def is_http_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def extract_preview_image_from_feed_entry(entry: feedparser.FeedParserDict) -> Optional[str]:
+    image_field = entry.get("image")
+    if isinstance(image_field, dict):
+        image_url = str(image_field.get("href") or image_field.get("url") or "").strip()
+        if is_http_url(image_url):
+            return image_url
+
+    for key in ("media_content", "media_thumbnail"):
+        media_items = entry.get(key, [])
+        if isinstance(media_items, list):
+            for item in media_items:
+                if isinstance(item, dict):
+                    media_url = str(item.get("url", "")).strip()
+                    if is_http_url(media_url):
+                        return media_url
+
+    links = entry.get("links", [])
+    if isinstance(links, list):
+        for link_item in links:
+            if not isinstance(link_item, dict):
+                continue
+            rel = str(link_item.get("rel", "")).strip().lower()
+            link_type = str(link_item.get("type", "")).strip().lower()
+            href = str(link_item.get("href", "")).strip()
+            if rel == "enclosure" and link_type.startswith("image/") and is_http_url(href):
+                return href
+    return None
+
+
+def extract_preview_image_from_html(html_body: str, page_url: str) -> Optional[str]:
+    meta_tag_pattern = re.compile(r"<meta\s+[^>]*>", re.IGNORECASE)
+    attr_pattern = re.compile(r'([a-zA-Z_:][-a-zA-Z0-9_:]*)\s*=\s*["\']([^"\']+)["\']')
+    accepted_keys = {"og:image", "og:image:url", "twitter:image", "twitter:image:src"}
+
+    for match in meta_tag_pattern.finditer(html_body):
+        tag = match.group(0)
+        attrs: dict[str, str] = {}
+        for attr_name, attr_value in attr_pattern.findall(tag):
+            attrs[attr_name.lower()] = attr_value.strip()
+
+        meta_key = (attrs.get("property") or attrs.get("name") or "").lower()
+        if meta_key not in accepted_keys:
+            continue
+
+        content_url = html.unescape(attrs.get("content", "")).strip()
+        if not content_url:
+            continue
+        resolved_url = urljoin(page_url, content_url)
+        if is_http_url(resolved_url):
+            return resolved_url
+    return None
+
+
+def discover_preview_image_from_url(article_url: str) -> Optional[str]:
+    if not is_http_url(article_url):
+        return None
+
+    headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
+    try:
+        response = requests.get(
+            article_url,
+            timeout=LINKEDIN_MEDIA_TIMEOUT,
+            headers=headers,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "text/html" not in content_type:
+        return None
+
+    html_body = response.text[:250000]
+    return extract_preview_image_from_html(html_body, response.url or article_url)
+
+
 def recency_points(published_at: Optional[datetime]) -> float:
     if not published_at:
         return 8.0
@@ -423,6 +511,7 @@ def fetch_rss_candidates(source_name: str, feed_url: str, max_items: int = 20) -
                 published_at=published_at,
                 topic=topic,
                 score=score,
+                preview_image_url=extract_preview_image_from_feed_entry(entry),
             )
         )
 
@@ -530,7 +619,20 @@ def choose_top_article(candidates: list[ArticleCandidate]) -> Optional[ArticleCa
     for candidate in candidates:
         candidate.score += float(title_counts[normalize_title(candidate.title)] - 1) * 20.0
 
-    return max(candidates, key=lambda candidate: candidate.score)
+    ranked = sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
+    for candidate in ranked[:LINKEDIN_MEDIA_SCAN_LIMIT]:
+        if not candidate.preview_image_url:
+            candidate.preview_image_url = discover_preview_image_from_url(candidate.url)
+        if candidate.preview_image_url:
+            candidate.score += LINKEDIN_MEDIA_IMAGE_BONUS
+
+    ranked = sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
+    image_first = [candidate for candidate in ranked if candidate.preview_image_url]
+    if image_first:
+        return image_first[0]
+
+    log("WARN", "No image metadata found in top candidates; posting best-ranked article link.")
+    return ranked[0]
 
 
 def choose_length_profile() -> LengthProfile:
@@ -707,8 +809,15 @@ def generate_fallback_summary(
 def build_post(candidate: ArticleCandidate, profile: LengthProfile) -> str:
     hook = choose_hook(candidate.topic)
     hashtags = choose_hashtags(candidate.topic)
+    headline_line = f"Trending headline: {candidate.title}"
     target_total_words = random.randint(profile.min_words, profile.max_words)
-    reserved_words = word_count(hook) + word_count(f"Source: {candidate.url}") + len(hashtags) + 8
+    reserved_words = (
+        word_count(hook)
+        + word_count(headline_line)
+        + word_count(f"Source: {candidate.url}")
+        + len(hashtags)
+        + 8
+    )
     target_summary_words = max(80, target_total_words - reserved_words)
     sentence_count = 2 if profile.name == "short" else 3
 
@@ -718,6 +827,7 @@ def build_post(candidate: ArticleCandidate, profile: LengthProfile) -> str:
 
     post_text = (
         f"{hook}\n\n"
+        f"{headline_line}\n\n"
         f"{summary}\n\n"
         f"Source: {candidate.url}\n\n"
         f"{' '.join(hashtags)}"
@@ -730,6 +840,7 @@ def build_post(candidate: ArticleCandidate, profile: LengthProfile) -> str:
         summary = append_clause(summary, random.choice(summary_clause_pool(candidate.topic)))
         post_text = (
             f"{hook}\n\n"
+            f"{headline_line}\n\n"
             f"{summary}\n\n"
             f"Source: {candidate.url}\n\n"
             f"{' '.join(hashtags)}"
@@ -740,6 +851,7 @@ def build_post(candidate: ArticleCandidate, profile: LengthProfile) -> str:
         summary = truncate_words(summary, max(50, allowed_summary_words))
         post_text = (
             f"{hook}\n\n"
+            f"{headline_line}\n\n"
             f"{summary}\n\n"
             f"Source: {candidate.url}\n\n"
             f"{' '.join(hashtags)}"
@@ -747,7 +859,7 @@ def build_post(candidate: ArticleCandidate, profile: LengthProfile) -> str:
 
     # LinkedIn UGC posts reject share commentary beyond 3000 chars.
     if len(post_text) > LINKEDIN_MAX_POST_CHARS:
-        prefix = f"{hook}\n\n"
+        prefix = f"{hook}\n\n{headline_line}\n\n"
         suffix = f"\n\nSource: {candidate.url}\n\n{' '.join(hashtags)}"
         allowed_summary_chars = max(0, LINKEDIN_MAX_POST_CHARS - len(prefix) - len(suffix))
         summary = truncate_chars(summary, allowed_summary_chars)
@@ -763,14 +875,35 @@ def normalize_person_urn(raw_person_urn: str) -> str:
     return f"urn:li:person:{value}"
 
 
-def post_to_linkedin(post_text: str, token: str, person_urn: str) -> requests.Response:
+def post_to_linkedin(
+    post_text: str,
+    candidate: ArticleCandidate,
+    token: str,
+    person_urn: str,
+) -> requests.Response:
+    media_description = clean_text(candidate.summary_hint)
+    if not media_description:
+        media_description = f"Trending {candidate.topic} news from {candidate.source}"
+
     payload = {
         "author": normalize_person_urn(person_urn),
         "lifecycleState": "PUBLISHED",
         "specificContent": {
             "com.linkedin.ugc.ShareContent": {
                 "shareCommentary": {"text": post_text},
-                "shareMediaCategory": "NONE",
+                "shareMediaCategory": "ARTICLE",
+                "media": [
+                    {
+                        "status": "READY",
+                        "originalUrl": candidate.url,
+                        "title": {
+                            "text": truncate_chars(candidate.title, LINKEDIN_MAX_MEDIA_TITLE_CHARS)
+                        },
+                        "description": {
+                            "text": truncate_chars(media_description, LINKEDIN_MAX_MEDIA_DESC_CHARS)
+                        },
+                    }
+                ],
             }
         },
         "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
@@ -820,7 +953,8 @@ def main() -> int:
     log(
         "INFO",
         f"Selected article: '{selected.title}' ({selected.source}) | "
-        f"profile={profile.name} | words={word_count(post_text)}",
+        f"profile={profile.name} | words={word_count(post_text)} | "
+        f"image_preview={'yes' if selected.preview_image_url else 'no'}",
     )
 
     if args.dry_run or os.getenv("DRY_RUN", "").strip().lower() == "true":
@@ -835,7 +969,7 @@ def main() -> int:
         return 1
 
     try:
-        response = post_to_linkedin(post_text, linkedin_token, linkedin_person_urn)
+        response = post_to_linkedin(post_text, selected, linkedin_token, linkedin_person_urn)
     except requests.RequestException as error:
         log("ERROR", f"LinkedIn API request failed: {error}")
         return 1
