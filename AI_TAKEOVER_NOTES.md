@@ -11,7 +11,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - LinkedIn bootstrap helper: `src/bootstrap_linkedin_secrets.py`
 - Workflow: `.github/workflows/post.yml`
 - Schedule: Tuesday + Friday at 09:00 UTC (`0 9 * * 2,5`)
-- Last verified manual workflow run: `23202704582` (**success**)
+- Last verified manual workflow run: `23226222725` (**success**, article card mode)
 
 ## 2) What was implemented (chronological)
 
@@ -34,6 +34,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 9. Completed live token setup and validated successful workflow execution.
 10. Switched LinkedIn payload from text-only posts to ARTICLE shares with link cards.
 11. Added image-first candidate preference by detecting OG/Twitter image metadata from feeds/pages.
+12. Live-validated article-card posting after the change (`share urn:li:share:7439860186632101888`).
 
 ## 3) Key decisions and rationale
 
