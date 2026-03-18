@@ -1216,7 +1216,11 @@ def publish_direct_repost(
             attempt_count += 1
             if response.status_code in (200, 201):
                 log("INFO", f"Direct repost created successfully via parent={parent_urn}.")
-                print(response.text)
+                response_id = response.headers.get("x-restli-id") or response.headers.get("X-RestLi-Id")
+                if response.text.strip():
+                    print(response.text)
+                elif response_id:
+                    print(f'{{"id":"{response_id}"}}')
                 return 0
 
             if response.status_code == 403:
@@ -1238,7 +1242,11 @@ def publish_direct_repost(
                 attempt_count += 1
                 if ugc_response.status_code in (200, 201):
                     log("INFO", f"Direct repost created successfully via ugcPosts parent={parent_urn}.")
-                    print(ugc_response.text)
+                    response_id = ugc_response.headers.get("x-restli-id") or ugc_response.headers.get("X-RestLi-Id")
+                    if ugc_response.text.strip():
+                        print(ugc_response.text)
+                    elif response_id:
+                        print(f'{{"id":"{response_id}"}}')
                     return 0
 
                 if ugc_response.status_code == 403:
