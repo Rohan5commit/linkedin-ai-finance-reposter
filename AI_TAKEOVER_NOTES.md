@@ -12,7 +12,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Workflow: `.github/workflows/post.yml`
 - Schedule: Tuesday + Friday at 09:00 UTC (`0 9 * * 2,5`)
 - Last successful manual workflow run: `23226222725` (**success**, article card mode)
-- Latest direct-repost validation runs: `23226616001`, `23226692481` (**failed**, HTTP 403 on all third-party repost attempts)
+- Latest direct-repost validation runs: `23226616001`, `23226692481`, `23226778661` (**failed**, HTTP 403 on all third-party repost attempts)
 
 ## 2) What was implemented (chronological)
 
