@@ -480,6 +480,69 @@ def extract_parent_urn_candidates_from_url(post_url: str) -> list[str]:
     return unique_preserve_order(urns)
 
 
+def extract_activity_id_from_linkedin_post_url(post_url: str) -> Optional[str]:
+    activity_match = re.search(r"activity-(\d+)", post_url)
+    if activity_match:
+        return activity_match.group(1)
+
+    activity_urn_match = re.search(r"urn:li:activity:(\d+)", post_url)
+    if activity_urn_match:
+        return activity_urn_match.group(1)
+    return None
+
+
+def common_prefix_length(a: str, b: str) -> int:
+    total = 0
+    for left, right in zip(a, b):
+        if left != right:
+            break
+        total += 1
+    return total
+
+
+def rank_parent_urn_candidates(
+    urn_counts: dict[str, int],
+    activity_id: Optional[str],
+) -> list[str]:
+    ranked_items: list[tuple[str, tuple[int, int, int, int]]] = []
+    for urn, count in urn_counts.items():
+        urn_id = urn.rsplit(":", 1)[-1]
+        prefix_len = common_prefix_length(urn_id, activity_id) if activity_id else 0
+        distance = (
+            abs(int(urn_id) - int(activity_id))
+            if activity_id and urn_id.isdigit() and activity_id.isdigit()
+            else 10**30
+        )
+        type_bias = 0 if ":share:" in urn else 1
+        sort_key = (-prefix_len, distance, -count, type_bias)
+        ranked_items.append((urn, sort_key))
+
+    ranked_items.sort(key=lambda item: item[1])
+    return [urn for urn, _ in ranked_items]
+
+
+def discover_parent_urn_candidates_from_page(post_url: str) -> list[str]:
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; linkedin-ai-finance-reposter/1.0)"}
+    activity_id = extract_activity_id_from_linkedin_post_url(post_url)
+    try:
+        response = requests.get(post_url, timeout=REQUEST_TIMEOUT, headers=headers)
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
+
+    html_body = response.text
+    urn_matches = re.findall(r"urn:li:(?:share|ugcPost):\d+", html_body)
+    if not urn_matches:
+        return []
+
+    urn_counts: dict[str, int] = {}
+    for urn in urn_matches:
+        urn_counts[urn] = urn_counts.get(urn, 0) + 1
+
+    ranked = rank_parent_urn_candidates(urn_counts, activity_id)
+    return ranked[:8]
+
+
 def build_title_from_linkedin_post_url(post_url: str) -> str:
     path = urlparse(post_url).path
     slug_match = re.search(r"/posts/([^/?#]+)", path)
@@ -1129,7 +1192,16 @@ def publish_direct_repost(
     forbidden_count = 0
     for candidate in candidates:
         commentary = build_direct_reshare_commentary(candidate)
-        for parent_urn in candidate.parent_urn_candidates:
+        discovered_parent_urns = discover_parent_urn_candidates_from_page(candidate.url)
+        parent_urns = unique_preserve_order(discovered_parent_urns + candidate.parent_urn_candidates)
+        if discovered_parent_urns:
+            log(
+                "INFO",
+                f"Resolved parent URNs from page metadata for '{candidate.title}': "
+                + ", ".join(parent_urns[:4]),
+            )
+
+        for parent_urn in parent_urns:
             log(
                 "INFO",
                 f"Trying direct repost: topic={candidate.topic} | parent={parent_urn} | title='{candidate.title}'",
