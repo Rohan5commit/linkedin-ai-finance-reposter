@@ -45,6 +45,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 16. Added compatibility fallback from `/rest/posts` reshare to `ugcPosts` response-context reshare; latest success used this fallback path.
 17. Replaced fixed Tue/Fri cadence with weekly random day selection (2 random days chosen per ISO week, deterministic from seed).
 18. Added fallback candidate source: curated public LinkedIn post URL list used when live search discovery is unavailable.
+19. Added run-based candidate rotation to avoid posting the same source repeatedly in burst/manual runs.
 
 ## 3) Key decisions and rationale
 

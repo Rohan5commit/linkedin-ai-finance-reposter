@@ -13,6 +13,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Adds short professional commentary + hashtags to improve feed engagement while still being a direct repost.
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
 - If live search discovery is temporarily blocked, uses a curated fallback list of public AI/tech/finance LinkedIn post URLs so runs can still execute.
+- Applies run-based candidate rotation to reduce back-to-back duplicate reposts during burst/manual runs.
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
 
 ## Repository structure

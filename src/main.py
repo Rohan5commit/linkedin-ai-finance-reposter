@@ -956,6 +956,34 @@ def build_direct_reshare_commentary(candidate: RepostCandidate) -> str:
     return truncate_chars(commentary, LINKEDIN_MAX_POST_CHARS)
 
 
+def prioritize_repost_candidates_for_run(candidates: list[RepostCandidate]) -> list[RepostCandidate]:
+    if len(candidates) <= 1:
+        return candidates
+
+    ordered = list(candidates)
+    run_id_raw = os.getenv("GITHUB_RUN_ID", "").strip()
+    if not run_id_raw.isdigit():
+        return ordered
+
+    run_id = int(run_id_raw)
+    fallback_only = all(candidate.source == "Fallback LinkedIn URL List" for candidate in ordered)
+    if fallback_only:
+        offset = run_id % len(ordered)
+        if offset:
+            ordered = ordered[offset:] + ordered[:offset]
+        log("INFO", f"Applied fallback candidate rotation (offset={offset}) for run_id={run_id}.")
+        return ordered
+
+    pool_size = min(5, len(ordered))
+    offset = run_id % pool_size
+    if offset:
+        rotated_pool = ordered[:pool_size]
+        rotated_pool = rotated_pool[offset:] + rotated_pool[:offset]
+        ordered = rotated_pool + ordered[pool_size:]
+    log("INFO", f"Applied top-candidate rotation (pool={pool_size}, offset={offset}) for run_id={run_id}.")
+    return ordered
+
+
 def append_clause(sentence: str, clause: str) -> str:
     trimmed = sentence.rstrip().rstrip(".")
     return f"{trimmed}; {clause.rstrip('.')}."
@@ -1415,6 +1443,7 @@ def main() -> int:
         if not repost_candidates:
             log("WARN", "No repostable LinkedIn post candidates found; skipping this run.")
             return 0
+        repost_candidates = prioritize_repost_candidates_for_run(repost_candidates)
 
         top_candidate = repost_candidates[0]
         top_commentary = build_direct_reshare_commentary(top_candidate)
