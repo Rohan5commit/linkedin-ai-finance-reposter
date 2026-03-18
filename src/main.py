@@ -1125,6 +1125,8 @@ def publish_direct_repost(
     person_urn: str,
 ) -> int:
     last_error_body = ""
+    attempt_count = 0
+    forbidden_count = 0
     for candidate in candidates:
         commentary = build_direct_reshare_commentary(candidate)
         for parent_urn in candidate.parent_urn_candidates:
@@ -1139,11 +1141,14 @@ def publish_direct_repost(
                 last_error_body = str(error)
                 continue
 
+            attempt_count += 1
             if response.status_code in (200, 201):
                 log("INFO", f"Direct repost created successfully via parent={parent_urn}.")
                 print(response.text)
                 return 0
 
+            if response.status_code == 403:
+                forbidden_count += 1
             log("WARN", f"Direct repost failed for parent={parent_urn} with HTTP {response.status_code}")
             if response.text:
                 log("WARN", truncate_chars(clean_text(response.text), 350))
@@ -1158,11 +1163,14 @@ def publish_direct_repost(
                     last_error_body = str(error)
                     continue
 
+                attempt_count += 1
                 if ugc_response.status_code in (200, 201):
                     log("INFO", f"Direct repost created successfully via ugcPosts parent={parent_urn}.")
                     print(ugc_response.text)
                     return 0
 
+                if ugc_response.status_code == 403:
+                    forbidden_count += 1
                 log(
                     "WARN",
                     f"UGC repost fallback failed for parent={parent_urn} with HTTP {ugc_response.status_code}",
@@ -1170,6 +1178,15 @@ def publish_direct_repost(
                 if ugc_response.text:
                     log("WARN", truncate_chars(clean_text(ugc_response.text), 350))
                 last_error_body = ugc_response.text
+
+    if attempt_count > 0 and forbidden_count == attempt_count:
+        log(
+            "ERROR",
+            "LinkedIn returned HTTP 403 for all repost attempts. "
+            "Direct repost of third-party posts is blocked for this app/token. "
+            "This usually requires LinkedIn-approved restricted access (for example r_member_social) "
+            "and repostable target content visibility.",
+        )
 
     log("ERROR", "Could not create a direct repost from discovered LinkedIn posts.")
     if last_error_body:

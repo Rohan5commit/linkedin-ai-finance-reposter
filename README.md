@@ -4,7 +4,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 
 ## What this repository does
 
-- Discovers candidate public LinkedIn posts via free web search (`duckduckgo.com/html`) constrained to `linkedin.com/posts` and AI/tech/finance queries.
+- Discovers candidate public LinkedIn posts via free web search (`duckduckgo.com/html` fetched through `r.jina.ai`) constrained to `linkedin.com/posts` and AI/tech/finance queries.
 - Extracts candidate parent URNs from LinkedIn post URLs (`activity`, `share`, `ugcPost` variants).
 - Filters and ranks candidates for topical relevance and recency-style search ranking.
 - Publishes a **true direct repost** via LinkedIn Posts API (`POST /rest/posts`) using `reshareContext.parent`.
@@ -70,6 +70,8 @@ https://www.linkedin.com/oauth/v2/authorization
 &redirect_uri=<URL_ENCODED_REDIRECT_URI>
 &scope=openid%20profile%20w_member_social
 ```
+
+Important for **direct reposts of third-party posts**: if LinkedIn returns HTTP `403 FORBIDDEN` for all repost attempts, your app/token likely does not have sufficient approved access for member-content repost operations (commonly restricted access such as `r_member_social` plus repostable target visibility).
 
 4. Exchange auth code for access token:
 

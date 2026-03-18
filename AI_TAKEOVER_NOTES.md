@@ -11,7 +11,8 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - LinkedIn bootstrap helper: `src/bootstrap_linkedin_secrets.py`
 - Workflow: `.github/workflows/post.yml`
 - Schedule: Tuesday + Friday at 09:00 UTC (`0 9 * * 2,5`)
-- Last verified manual workflow run: `23226222725` (**success**, article card mode; superseded by direct-repost requirement)
+- Last successful manual workflow run: `23226222725` (**success**, article card mode)
+- Latest direct-repost validation runs: `23226616001`, `23226692481` (**failed**, HTTP 403 on all third-party repost attempts)
 
 ## 2) What was implemented (chronological)
 
@@ -82,7 +83,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
 
 - User clarified that ARTICLE shares were still not acceptable; they wanted an actual LinkedIn repost.
 - Implemented direct repost path through `POST /rest/posts` with `reshareContext.parent`.
-- Since member-feed APIs are restricted, discovery now uses free public search (DuckDuckGo HTML) for `linkedin.com/posts` URLs and derives candidate parent URNs (`share`, `ugcPost`, `activity`) from URL activity IDs.
+- Since member-feed APIs are restricted, discovery now uses free public search (DuckDuckGo HTML via `r.jina.ai`) for `linkedin.com/posts` URLs and derives candidate parent URNs (`share`, `ugcPost`) from URL activity IDs.
 - Publisher retries multiple URN variants and multiple candidates before failing.
 
 ## 4) Secrets and credentials model
@@ -100,6 +101,7 @@ No secrets are stored in committed files.
 1. LinkedIn access token is time-bound; if runs fail with `INVALID_ACCESS_TOKEN`, refresh token and reset secret.
 2. GitHub Actions currently shows Node 20 deprecation annotations for `actions/checkout@v4` and `actions/setup-python@v5`. Track updates.
 3. Reuters direct feed failures are expected in some environments; fallback path is intentional.
+4. Direct repost of third-party LinkedIn posts is currently blocked with HTTP 403 for this app/token. Code now surfaces this explicitly; likely requires LinkedIn-approved restricted access and repostable target visibility.
 
 ## 6) Useful operational commands
 
