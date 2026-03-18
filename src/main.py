@@ -462,7 +462,7 @@ def normalize_linkedin_post_url(url: str) -> str:
 
 def extract_parent_urn_candidates_from_url(post_url: str) -> list[str]:
     urns: list[str] = []
-    for urn_type, urn_id in re.findall(r"urn:li:(share|ugcPost|activity):([A-Za-z0-9_-]+)", post_url):
+    for urn_type, urn_id in re.findall(r"urn:li:(share|ugcPost):([A-Za-z0-9_-]+)", post_url):
         urns.append(f"urn:li:{urn_type}:{urn_id}")
 
     activity_match = re.search(r"activity-(\d+)", post_url)
@@ -474,7 +474,6 @@ def extract_parent_urn_candidates_from_url(post_url: str) -> list[str]:
             [
                 f"urn:li:share:{activity_id}",
                 f"urn:li:ugcPost:{activity_id}",
-                f"urn:li:activity:{activity_id}",
             ]
         )
 
@@ -1089,6 +1088,37 @@ def post_direct_reshare(
     )
 
 
+def post_direct_reshare_via_ugc(
+    commentary: str,
+    parent_urn: str,
+    token: str,
+    person_urn: str,
+) -> requests.Response:
+    payload = {
+        "author": normalize_person_urn(person_urn),
+        "lifecycleState": "PUBLISHED",
+        "specificContent": {
+            "com.linkedin.ugc.ShareContent": {
+                "shareCommentary": {"text": commentary},
+                "shareMediaCategory": "NONE",
+            }
+        },
+        "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
+        "responseContext": {"parent": parent_urn},
+    }
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Restli-Protocol-Version": "2.0.0",
+        "Content-Type": "application/json",
+    }
+    return requests.post(
+        LINKEDIN_UGC_API_URL,
+        json=payload,
+        headers=headers,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
 def publish_direct_repost(
     candidates: list[RepostCandidate],
     token: str,
@@ -1118,6 +1148,28 @@ def publish_direct_repost(
             if response.text:
                 log("WARN", truncate_chars(clean_text(response.text), 350))
             last_error_body = response.text
+
+            # Fallback: try legacy ugcPosts reshare context for broader compatibility.
+            if response.status_code in (403, 404, 422):
+                try:
+                    ugc_response = post_direct_reshare_via_ugc(commentary, parent_urn, token, person_urn)
+                except requests.RequestException as error:
+                    log("WARN", f"UGC repost fallback request failed ({error})")
+                    last_error_body = str(error)
+                    continue
+
+                if ugc_response.status_code in (200, 201):
+                    log("INFO", f"Direct repost created successfully via ugcPosts parent={parent_urn}.")
+                    print(ugc_response.text)
+                    return 0
+
+                log(
+                    "WARN",
+                    f"UGC repost fallback failed for parent={parent_urn} with HTTP {ugc_response.status_code}",
+                )
+                if ugc_response.text:
+                    log("WARN", truncate_chars(clean_text(ugc_response.text), 350))
+                last_error_body = ugc_response.text
 
     log("ERROR", "Could not create a direct repost from discovered LinkedIn posts.")
     if last_error_body:
