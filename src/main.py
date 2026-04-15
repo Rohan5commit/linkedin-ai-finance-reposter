@@ -1084,14 +1084,26 @@ def choose_hashtags(topic: str) -> list[str]:
 
 
 def build_direct_reshare_commentary(candidate: RepostCandidate) -> str:
-    hook = choose_hook(candidate.topic)
-    hashtags = choose_hashtags(candidate.topic)
-    commentary = (
-        f"{hook}\n\n"
-        f"Direct repost signal: {candidate.title}\n\n"
-        f"{' '.join(hashtags)}"
-    )
-    return truncate_chars(commentary, LINKEDIN_MAX_POST_CHARS)
+    style = os.getenv("DIRECT_REPOST_COMMENTARY_STYLE", "hashtags").strip().lower()
+    hashtags_line = " ".join(choose_hashtags(candidate.topic))
+
+    if style in {"none", "off", "silent"}:
+        return ""
+
+    if style in {"hashtags", "tags", "minimal"}:
+        return truncate_chars(hashtags_line, LINKEDIN_MAX_POST_CHARS)
+
+    if style == "full":
+        hook = choose_hook(candidate.topic)
+        commentary = (
+            f"{hook}\n\n"
+            f"Direct repost signal: {candidate.title}\n\n"
+            f"{hashtags_line}"
+        )
+        return truncate_chars(commentary, LINKEDIN_MAX_POST_CHARS)
+
+    log("WARN", f"Unknown DIRECT_REPOST_COMMENTARY_STYLE='{style}'; defaulting to hashtags-only.")
+    return truncate_chars(hashtags_line, LINKEDIN_MAX_POST_CHARS)
 
 
 def prioritize_repost_candidates_for_run(candidates: list[RepostCandidate]) -> list[RepostCandidate]:
@@ -1335,7 +1347,6 @@ def post_direct_reshare(
 ) -> requests.Response:
     payload = {
         "author": normalize_person_urn(person_urn),
-        "commentary": commentary,
         "visibility": "PUBLIC",
         "distribution": {
             "feedDistribution": "MAIN_FEED",
@@ -1346,6 +1357,10 @@ def post_direct_reshare(
         "isReshareDisabledByAuthor": False,
         "reshareContext": {"parent": parent_urn},
     }
+    commentary_text = commentary.strip()
+    if commentary_text:
+        payload["commentary"] = commentary_text
+
     headers = {
         "Authorization": f"Bearer {token}",
         "X-Restli-Protocol-Version": "2.0.0",
@@ -1366,14 +1381,18 @@ def post_direct_reshare_via_ugc(
     token: str,
     person_urn: str,
 ) -> requests.Response:
+    share_content: dict[str, object] = {
+        "shareMediaCategory": "NONE",
+    }
+    commentary_text = commentary.strip()
+    if commentary_text:
+        share_content["shareCommentary"] = {"text": commentary_text}
+
     payload = {
         "author": normalize_person_urn(person_urn),
         "lifecycleState": "PUBLISHED",
         "specificContent": {
-            "com.linkedin.ugc.ShareContent": {
-                "shareCommentary": {"text": commentary},
-                "shareMediaCategory": "NONE",
-            }
+            "com.linkedin.ugc.ShareContent": share_content
         },
         "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
         "responseContext": {"parent": parent_urn},

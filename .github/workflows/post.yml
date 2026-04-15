@@ -40,6 +40,7 @@ jobs:
           NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
           NIM_MODEL: meta/llama-3.1-8b-instruct
           LINKEDIN_DIRECT_REPOST_ONLY: "true"
+          DIRECT_REPOST_COMMENTARY_STYLE: "hashtags"
           RANDOMIZE_WEEKLY_RUN_DAYS: "true"
           RANDOM_SCHEDULE_SEED: ${{ github.repository }}
           REPOST_HISTORY_FILE: .cache/repost_history.json

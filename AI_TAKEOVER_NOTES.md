@@ -51,6 +51,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
    - blocks candidates that hit the recent cooldown window
    - persists history across runs via GitHub Actions cache restore/save
    - cleanly skips runs (success) when all candidates are recently used, instead of reposting duplicates
+21. Removed AI-sounding direct-repost prose by adding `DIRECT_REPOST_COMMENTARY_STYLE` and setting workflow default to hashtags-only.
 
 ## 3) Key decisions and rationale
 
@@ -98,6 +99,15 @@ It records **what was done**, **why those choices were made**, and **what to do 
 - Implemented direct repost path through `POST /rest/posts` with `reshareContext.parent`.
 - Since member-feed APIs are restricted, discovery now uses free public search (DuckDuckGo HTML via `r.jina.ai`) for `linkedin.com/posts` URLs and derives candidate parent URNs (`share`, `ugcPost`) from URL activity IDs.
 - Publisher retries multiple URN variants and multiple candidates before failing.
+
+### L) Remove AI-sounding repost text
+
+- User feedback: commentary above repost looked AI-generated.
+- Added configurable commentary styles for direct reposts:
+  - `hashtags` (default in workflow)
+  - `none` (no text above repost)
+  - `full` (legacy hook/title/hashtags format)
+- Updated posting payload builders to omit commentary fields entirely when style is `none`.
 
 ### I) Random weekly schedule (2 days)
 
