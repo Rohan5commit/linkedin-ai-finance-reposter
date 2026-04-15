@@ -10,7 +10,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Publishes a **true direct repost** by trying:
   - LinkedIn Posts API (`POST /rest/posts`, `reshareContext.parent`)
   - compatibility fallback via `ugcPosts` (`responseContext.parent`)
-- Uses **hashtags-only repost text by default** to avoid AI-sounding commentary above reposts.
+- Uses **no text above reposts by default** to avoid AI-sounding commentary.
 - Supports optional modes: hashtags-only, no text, or full commentary.
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
 - If live search discovery is temporarily blocked, uses a curated fallback list of public AI/tech/finance LinkedIn post URLs so runs can still execute.
@@ -158,7 +158,7 @@ Mode switch:
 
 - `LINKEDIN_DIRECT_REPOST_ONLY=true` (default): true direct repost path
 - `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
-- `DIRECT_REPOST_COMMENTARY_STYLE=hashtags|none|full` (default: `hashtags`): control text above direct reposts
+- `DIRECT_REPOST_COMMENTARY_STYLE=hashtags|none|full` (default: `none`): control text above direct reposts
 - `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce 2-random-days-per-week gate on scheduled runs
 - `RANDOM_SCHEDULE_SEED=<string>`: changes which two days are selected each week
 - `REPOST_HISTORY_FILE=.cache/repost_history.json`: file used for cross-run repost memory

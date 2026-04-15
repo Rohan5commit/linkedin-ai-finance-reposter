@@ -1084,7 +1084,7 @@ def choose_hashtags(topic: str) -> list[str]:
 
 
 def build_direct_reshare_commentary(candidate: RepostCandidate) -> str:
-    style = os.getenv("DIRECT_REPOST_COMMENTARY_STYLE", "hashtags").strip().lower()
+    style = os.getenv("DIRECT_REPOST_COMMENTARY_STYLE", "none").strip().lower()
     hashtags_line = " ".join(choose_hashtags(candidate.topic))
 
     if style in {"none", "off", "silent"}:

@@ -51,7 +51,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
    - blocks candidates that hit the recent cooldown window
    - persists history across runs via GitHub Actions cache restore/save
    - cleanly skips runs (success) when all candidates are recently used, instead of reposting duplicates
-21. Removed AI-sounding direct-repost prose by adding `DIRECT_REPOST_COMMENTARY_STYLE` and setting workflow default to hashtags-only.
+21. Removed AI-sounding direct-repost prose by adding `DIRECT_REPOST_COMMENTARY_STYLE` and setting workflow default to no text (`none`).
 
 ## 3) Key decisions and rationale
 
@@ -104,8 +104,8 @@ It records **what was done**, **why those choices were made**, and **what to do 
 
 - User feedback: commentary above repost looked AI-generated.
 - Added configurable commentary styles for direct reposts:
-  - `hashtags` (default in workflow)
-  - `none` (no text above repost)
+  - `none` (default in workflow; no text above repost)
+  - `hashtags`
   - `full` (legacy hook/title/hashtags format)
 - Updated posting payload builders to omit commentary fields entirely when style is `none`.
 
