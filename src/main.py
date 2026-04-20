@@ -13,7 +13,7 @@ import re
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urljoin, urlparse
 
@@ -39,6 +39,9 @@ DIRECT_REPOST_RESULT_LIMIT = 20
 DEFAULT_REPOST_HISTORY_FILE = ".cache/repost_history.json"
 DEFAULT_REPOST_HISTORY_MAX_ENTRIES = 250
 DEFAULT_REPOST_COOLDOWN_POSTS = 80
+DEFAULT_MAX_REPOST_AGE_DAYS = 7
+MAX_REPOST_AGE_DAYS_MIN = 1
+MAX_REPOST_AGE_DAYS_MAX = 365
 
 DIRECT_REPOST_QUERIES = [
     (
@@ -257,6 +260,7 @@ class RepostCandidate:
     topic: str
     score: float
     parent_urn_candidates: list[str]
+    inferred_created_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -360,6 +364,130 @@ def parse_positive_int_env(name: str, default_value: int) -> int:
         return int(raw_value)
     log("WARN", f"Invalid {name}='{raw_value}'; using default {default_value}.")
     return default_value
+
+
+def parse_max_repost_age_days_env(default_value: int = DEFAULT_MAX_REPOST_AGE_DAYS) -> int:
+    raw_value = os.getenv("MAX_REPOST_AGE_DAYS", "").strip()
+    if not raw_value:
+        return default_value
+    try:
+        parsed_value = int(raw_value)
+    except ValueError:
+        log("WARN", f"Invalid MAX_REPOST_AGE_DAYS='{raw_value}'; using default {default_value}.")
+        return default_value
+    if MAX_REPOST_AGE_DAYS_MIN <= parsed_value <= MAX_REPOST_AGE_DAYS_MAX:
+        return parsed_value
+    log(
+        "WARN",
+        "Invalid MAX_REPOST_AGE_DAYS="
+        f"'{raw_value}'; expected {MAX_REPOST_AGE_DAYS_MIN}-{MAX_REPOST_AGE_DAYS_MAX}. "
+        f"Using default {default_value}.",
+    )
+    return default_value
+
+
+def extract_numeric_linkedin_ids_for_candidate(candidate: RepostCandidate) -> list[int]:
+    extracted_ids: list[int] = []
+    for parent_urn in candidate.parent_urn_candidates:
+        urn_id = parent_urn.rsplit(":", 1)[-1].strip()
+        if urn_id.isdigit():
+            extracted_ids.append(int(urn_id))
+
+    activity_id = extract_activity_id_from_linkedin_post_url(candidate.url)
+    if activity_id and activity_id.isdigit():
+        extracted_ids.append(int(activity_id))
+
+    for urn_id in re.findall(r"urn:li:(?:share|ugcPost|activity):(\d+)", candidate.url):
+        if urn_id.isdigit():
+            extracted_ids.append(int(urn_id))
+
+    unique_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for identifier in extracted_ids:
+        if identifier not in seen_ids:
+            unique_ids.append(identifier)
+            seen_ids.add(identifier)
+    return unique_ids
+
+
+def linkedin_id_to_utc_datetime(identifier: int, now_utc: Optional[datetime] = None) -> Optional[datetime]:
+    if identifier <= 0:
+        return None
+    epoch_ms = identifier >> 22
+    if epoch_ms <= 0:
+        return None
+    try:
+        created_at = datetime.fromtimestamp(epoch_ms / 1000.0, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+    reference_now = now_utc or datetime.now(timezone.utc)
+    if created_at.year < 2000:
+        return None
+    if created_at > reference_now + timedelta(days=2):
+        return None
+    return created_at
+
+
+def infer_repost_candidate_created_at(
+    candidate: RepostCandidate, now_utc: Optional[datetime] = None
+) -> Optional[datetime]:
+    timestamps: list[datetime] = []
+    for identifier in extract_numeric_linkedin_ids_for_candidate(candidate):
+        created_at = linkedin_id_to_utc_datetime(identifier, now_utc=now_utc)
+        if created_at is not None:
+            timestamps.append(created_at)
+    if not timestamps:
+        return None
+    return max(timestamps)
+
+
+def filter_repost_candidates_by_freshness(
+    candidates: list[RepostCandidate],
+    max_age_days: int,
+    now_utc: Optional[datetime] = None,
+) -> list[RepostCandidate]:
+    reference_now = now_utc or datetime.now(timezone.utc)
+    max_age = timedelta(days=max_age_days)
+    fresh_candidates: list[RepostCandidate] = []
+    filtered_old = 0
+    filtered_unknown = 0
+
+    for candidate in candidates:
+        inferred_created_at = infer_repost_candidate_created_at(candidate, now_utc=reference_now)
+        if inferred_created_at is None:
+            filtered_unknown += 1
+            log(
+                "WARN",
+                "Skipping repost candidate with unknown age: "
+                f"title='{candidate.title}' | source={candidate.source} | url={candidate.url}",
+            )
+            continue
+
+        candidate.inferred_created_at = inferred_created_at
+        candidate_age = reference_now - inferred_created_at
+        if candidate_age > max_age:
+            filtered_old += 1
+            age_days = candidate_age.total_seconds() / 86400.0
+            log(
+                "INFO",
+                "Skipping stale repost candidate: "
+                f"title='{candidate.title}' | source={candidate.source} | "
+                f"age_days={age_days:.1f} | max_age_days={max_age_days}",
+            )
+            continue
+
+        fresh_candidates.append(candidate)
+
+    if filtered_old or filtered_unknown:
+        log(
+            "INFO",
+            "Freshness filter results: "
+            f"kept={len(fresh_candidates)} | filtered_old={filtered_old} | "
+            f"filtered_unknown_age={filtered_unknown} | max_age_days={max_age_days}",
+        )
+
+    return fresh_candidates
 
 
 def load_repost_history(file_path: str, max_entries: int) -> list[str]:
@@ -1622,6 +1750,7 @@ def main() -> int:
         DEFAULT_REPOST_HISTORY_MAX_ENTRIES,
     )
     repost_cooldown_posts = parse_positive_int_env("REPOST_COOLDOWN_POSTS", DEFAULT_REPOST_COOLDOWN_POSTS)
+    max_repost_age_days = parse_max_repost_age_days_env()
 
     if randomize_weekly_run_days and event_name == "schedule" and not args.ignore_random_schedule:
         now_utc = datetime.now(timezone.utc)
@@ -1646,6 +1775,14 @@ def main() -> int:
         repost_candidates = fetch_linkedin_repost_candidates()
         if not repost_candidates:
             log("WARN", "No repostable LinkedIn post candidates found; skipping this run.")
+            return 0
+        repost_candidates = filter_repost_candidates_by_freshness(repost_candidates, max_repost_age_days)
+        if not repost_candidates:
+            log(
+                "WARN",
+                "All discovered repost candidates were older than the freshness window or had unknown age; "
+                f"skipping this run (MAX_REPOST_AGE_DAYS={max_repost_age_days}).",
+            )
             return 0
         repost_candidates = prioritize_repost_candidates_for_run(repost_candidates)
         recent_parent_urns = load_repost_history(repost_history_file, repost_history_max_entries)
@@ -1681,10 +1818,14 @@ def main() -> int:
 
         top_candidate = repost_candidates[0]
         top_commentary = build_direct_reshare_commentary(top_candidate)
+        age_days = None
+        if top_candidate.inferred_created_at is not None:
+            age_days = (datetime.now(timezone.utc) - top_candidate.inferred_created_at).total_seconds() / 86400.0
         log(
             "INFO",
             f"Top direct repost candidate: '{top_candidate.title}' ({top_candidate.source}) | "
-            f"score={top_candidate.score:.1f} | urn_options={len(top_candidate.parent_urn_candidates)}",
+            f"score={top_candidate.score:.1f} | urn_options={len(top_candidate.parent_urn_candidates)}"
+            + (f" | age_days={age_days:.1f}" if age_days is not None else ""),
         )
 
         if is_dry_run:

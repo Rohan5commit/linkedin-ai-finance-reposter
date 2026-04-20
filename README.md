@@ -7,6 +7,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Discovers candidate public LinkedIn posts via free web search (`duckduckgo.com/html` fetched through `r.jina.ai`) constrained to `linkedin.com/posts` and AI/tech/finance queries.
 - Extracts candidate parent URNs from public LinkedIn page metadata (`urn:li:share:*` / `urn:li:ugcPost:*`) and ranks them against the URL activity ID.
 - Filters and ranks candidates for topical relevance and recency-style search ranking.
+- Enforces a strict direct-repost freshness gate: only candidates with derivable LinkedIn IDs newer than or equal to 7 days (configurable) are eligible.
 - Publishes a **true direct repost** by trying:
   - LinkedIn Posts API (`POST /rest/posts`, `reshareContext.parent`)
   - compatibility fallback via `ugcPosts` (`responseContext.parent`)
@@ -164,11 +165,13 @@ Mode switch:
 - `REPOST_HISTORY_FILE=.cache/repost_history.json`: file used for cross-run repost memory
 - `REPOST_HISTORY_MAX_ENTRIES=500`: max parent URNs retained in history
 - `REPOST_COOLDOWN_POSTS=120`: most-recent reposts blocked from reuse
+- `MAX_REPOST_AGE_DAYS=7`: maximum candidate age for direct reposts; candidates older than this (or with unknown age) are skipped
 
 ## Error handling behavior
 
 - In legacy article mode, if no relevant article is found, the run is skipped with a warning and exits successfully.
 - If no repostable LinkedIn post candidates are found, the run is skipped with a warning and exits successfully.
+- If all repost candidates are older than `MAX_REPOST_AGE_DAYS` (or their age cannot be derived from URL/URN IDs), the run is skipped with a warning and exits successfully.
 - If all discovered repost candidates were used recently (cooldown history hit), the run is skipped with a warning to avoid duplicates.
 - If all repost attempts fail (invalid parent/private post/permissions), the script prints the last API error body and exits non-zero, so GitHub Actions marks the run as failed.
 - If every repost attempt returns `403`, the script logs an explicit permission warning to speed up LinkedIn access troubleshooting.

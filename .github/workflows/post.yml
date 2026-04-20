@@ -46,6 +46,7 @@ jobs:
           REPOST_HISTORY_FILE: .cache/repost_history.json
           REPOST_HISTORY_MAX_ENTRIES: "500"
           REPOST_COOLDOWN_POSTS: "120"
+          MAX_REPOST_AGE_DAYS: "7"
         run: python src/main.py
 
       - name: Success log
