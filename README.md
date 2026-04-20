@@ -14,7 +14,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Uses **no text above reposts by default** to avoid AI-sounding commentary.
 - Supports optional modes: hashtags-only, no text, or full commentary.
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
-- If live search discovery is temporarily blocked, uses a curated fallback list of public AI/tech/finance LinkedIn post URLs so runs can still execute.
+- If live search discovery is temporarily blocked, the run safely skips reposting instead of using stale static fallback URLs.
 - Applies run-based candidate rotation plus persistent repost-history cooldown filtering to prevent heavy repeats.
 - Persists recent repost parent URNs across workflow runs using GitHub Actions cache (`.cache/repost_history.json`).
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
