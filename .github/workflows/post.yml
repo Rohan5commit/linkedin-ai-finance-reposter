@@ -6,6 +6,10 @@ on:
   schedule:
     - cron: "0 9 * * *"
 
+concurrency:
+  group: linkedin-reposter-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   repost:
     runs-on: ubuntu-latest
@@ -19,9 +23,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/repost_history.json
-          key: repost-history-${{ github.run_id }}
+          key: repost-history-${{ github.ref_name }}-${{ github.run_number }}
           restore-keys: |
-            repost-history-
+            repost-history-${{ github.ref_name }}-
 
       - name: Set up Python
         uses: actions/setup-python@v5
