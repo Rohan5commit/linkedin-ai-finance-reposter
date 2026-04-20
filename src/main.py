@@ -58,54 +58,7 @@ DIRECT_REPOST_QUERIES = [
     ),
 ]
 
-FALLBACK_LINKEDIN_POST_URLS = [
-    "https://www.linkedin.com/posts/chintanzalani_state-of-ai-startup-funding-february-2026-activity-7436787925322715136-7rNJ",
-    "https://www.linkedin.com/posts/siemenssoftware_news-alert-were-excited-to-announce-activity-7424813993317371904-YROH",
-    "https://www.linkedin.com/posts/benreitzes_melius-ben-reitzes-on-how-ai-is-eating-software-activity-7417990754007965696-Q5CB",
-    "https://www.linkedin.com/posts/abhineetsing_ai-fintech-banking-activity-7370104749267841024-kl2J",
-    "https://www.linkedin.com/posts/bluematrix_fintech-capitalmarkets-ai-activity-7391623403679670272-jFws",
-    "https://www.linkedin.com/posts/dsac-danang_startup-ai-semiconductor-activity-7302185610578968576-Yh6C",
-    "https://www.linkedin.com/posts/mithileshtiwari_digitaltransformation-automation-ai-activity-7396503566372454400-GkqJ",
-    "https://www.linkedin.com/posts/mihir-desai-8246a0119_what-the-finance-industry-tells-us-about-activity-7104855278994513920-oQs8",
-    "https://www.linkedin.com/posts/renfroeric_how-ai-can-improve-your-finance-department-activity-7033982724050718720-rTrv",
-    "https://www.linkedin.com/posts/vischer-attorneys-at-law_aiinlaw-blogseries-innovation-activity-7171180250591178752-kCV1",
-    "https://www.linkedin.com/posts/ruzan-desai-29361a26_what-the-finance-industry-tells-us-about-activity-7104906334562615297-W1_O",
-    "https://www.linkedin.com/posts/financial-conduct-authority_the-ai-revolution-opportunities-and-challenges-activity-7103393934931841024-1M1_",
-    "https://www.linkedin.com/posts/dean-gombe-a68758138_machinelearning-ai-finance-activity-7107584965080473600-olD3",
-    "https://www.linkedin.com/posts/sam-buck-19424969_the-future-of-ai-in-finance-is-here-ramp-activity-7065013325109055490-N4b8",
-    "https://www.linkedin.com/posts/deloitte_see-the-potential-create-your-future-activity-7133048233446043648-M7UZ",
-    "https://www.linkedin.com/posts/vena-solutions_ai-finance-tech-activity-7126321146794262528-IsYp",
-    "https://www.linkedin.com/posts/the-alan-turing-institute_the-ai-revolution-opportunities-and-challenges-activity-7103352698095226881-b6Ze",
-    "https://www.linkedin.com/posts/priyankjammar_ai-for-finance-activity-7126784862354620416-OFWA",
-    "https://www.linkedin.com/posts/swetabarua_fingpt-finance-ai-activity-7093099077663408128-1o93",
-    "https://www.linkedin.com/posts/sameenashah_how-ai-is-powering-the-future-of-financial-activity-6924053985993609216-Ki7U",
-    "https://www.linkedin.com/posts/financial-times_ai-presents-growing-risk-to-financial-markets-activity-7141255434534879232-v541",
-    "https://www.linkedin.com/posts/ucl-institute-of-finance-and-technology_ai-will-not-replace-fund-managers-for-a-generation-activity-7170808999884394496-bhKB",
-    "https://www.linkedin.com/posts/talhajamalkhan_10-free-ai-tools-every-finance-fpa-professional-activity-7366151386905919488-wMTY",
-    "https://www.linkedin.com/posts/markets-recon_the-ai-tipping-point-morgan-stanley-oliver-activity-7121072582572810240-FKU8",
-    "https://www.linkedin.com/posts/tamarasallen_84-of-cfos-continue-to-face-significant-activity-7120442215012716545-3Tmy",
-    "https://www.linkedin.com/posts/hicham-abdessamad_bloomberg-unveils-finance-focused-ai-model-activity-7050141786354139136-kMUF",
-    "https://www.linkedin.com/posts/raghavendrashiva_think-you-know-everything-about-generative-activity-7381943551653449728-fGN0",
-    "https://www.linkedin.com/posts/gs-lab_generative-ai-for-fintech-gavs-global-activity-7163879277489311744-bhX2",
-    "https://www.linkedin.com/posts/aidetic_generative-ai-in-fintech-goes-beyond-chatbot-activity-7094187915689295873-3FG3",
-    "https://www.linkedin.com/posts/in-the-pocket_generative-ai-in-banking-fintech-in-the-activity-7049673801558585344-k-wn",
-    "https://www.linkedin.com/posts/fintechfutures_unpacking-the-hype-generative-ai-in-banking-activity-7099711378248097794--1ZX",
-    "https://www.linkedin.com/posts/joe-fuqua_banking-and-finance-companies-hop-on-the-activity-7077642576274616320-8BOa",
-    "https://www.linkedin.com/posts/tramanhnguyen9_payments-futureofpayments-ai-activity-7419694948830134272-oeyG",
-    "https://www.linkedin.com/posts/ajasver_sharing-our-field-notes-the-state-of-generative-activity-7079931963104514048-pdzy",
-    "https://www.linkedin.com/posts/capgemini-fs_generative-ai-for-financial-services-activity-7123216849487446016--M4I",
-    "https://www.linkedin.com/posts/persado_generative-ai-in-financial-services-how-activity-7148821678884536320-8eMm",
-    "https://www.linkedin.com/posts/pearl-agarwal_fintech-lending-vc-activity-7094281147899084800-yHrt",
-    "https://www.linkedin.com/posts/elin-owen_fintech-generativeai-innovation-activity-7250479515943022593-We5F",
-    "https://www.linkedin.com/posts/arielsaban_the-financial-industry-is-on-the-cusp-of-activity-7166151151783026688-HodS",
-    "https://www.linkedin.com/posts/bcg-on-financial-institutions_how-generative-ai-is-already-transforming-activity-7082632124909903872-kJm7",
-    "https://www.linkedin.com/posts/bcg-on-financial-institutions_generative-ais-game-changing-potential-activity-7113844111568162816-7GJo",
-    "https://www.linkedin.com/posts/bcg-on-financial-institutions_unlocking-the-potential-of-generative-ai-activity-7099314189197795328-ti5p",
-    "https://www.linkedin.com/posts/theodoralau_chatgpt-and-generative-ai-what-does-banking-activity-7038825610940444672-sxaS",
-    "https://www.linkedin.com/posts/trovata-io_treasury-ai-finance-activity-7120452014324473857-_G5P",
-    "https://www.linkedin.com/posts/founders-circle-capital_generative-ai-in-finance-5-questions-finance-activity-7107405064721330176-VJDy",
-    "https://www.linkedin.com/posts/koenvanderhoydonk_how-generative-ai-is-shaping-the-financial-activity-7075004313273540608-gNJv",
-]
+FALLBACK_LINKEDIN_POST_URLS: list[str] = []
 
 RSS_SOURCES = [
     ("TechCrunch AI", "https://techcrunch.com/tag/artificial-intelligence/feed/"),
@@ -919,6 +872,13 @@ def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RE
     ranked = sorted(candidates_by_urn.values(), key=lambda candidate: candidate.score, reverse=True)
     if ranked:
         return ranked
+
+    if not FALLBACK_LINKEDIN_POST_URLS:
+        log(
+            "WARN",
+            "Search discovery returned no repost candidates and static fallback URLs are disabled; skipping run.",
+        )
+        return []
 
     fallback_candidates: list[RepostCandidate] = []
     for index, post_url in enumerate(FALLBACK_LINKEDIN_POST_URLS):
