@@ -1446,8 +1446,7 @@ def post_direct_reshare(
         "reshareContext": {"parent": parent_urn},
     }
     commentary_text = commentary.strip()
-    if commentary_text:
-        payload["commentary"] = commentary_text
+    payload["commentary"] = commentary_text if commentary_text else ""
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -1473,8 +1472,7 @@ def post_direct_reshare_via_ugc(
         "shareMediaCategory": "NONE",
     }
     commentary_text = commentary.strip()
-    if commentary_text:
-        share_content["shareCommentary"] = {"text": commentary_text}
+    share_content["shareCommentary"] = {"text": commentary_text if commentary_text else ""}
 
     payload = {
         "author": normalize_person_urn(person_urn),
