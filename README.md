@@ -14,7 +14,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Uses **no text above reposts by default** to avoid AI-sounding commentary.
 - Supports optional modes: hashtags-only, no text, or full commentary.
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
-- If live search discovery is temporarily blocked, the run safely skips reposting instead of using stale static fallback URLs.
+- If direct repost discovery fails, freshness filtering eliminates all candidates, or repost publish fails, the run falls back to posting a fresh AI/finance article so cadence is maintained.
 - Applies run-based candidate rotation plus persistent repost-history cooldown filtering to prevent heavy repeats.
 - Persists recent repost parent URNs across workflow runs using GitHub Actions cache (`.cache/repost_history.json`).
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
@@ -160,6 +160,7 @@ Mode switch:
 - `LINKEDIN_DIRECT_REPOST_ONLY=true` (default): true direct repost path
 - `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
 - `DIRECT_REPOST_COMMENTARY_STYLE=hashtags|none|full` (default: `none`): control text above direct reposts
+- `DIRECT_REPOST_ARTICLE_FALLBACK=true|false` (default: `true`): if direct repost path cannot publish, automatically post a fresh article instead
 - `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce 2-random-days-per-week gate on scheduled runs
 - `RANDOM_SCHEDULE_SEED=<string>`: changes which two days are selected each week
 - `REPOST_HISTORY_FILE=.cache/repost_history.json`: file used for cross-run repost memory
@@ -170,10 +171,10 @@ Mode switch:
 ## Error handling behavior
 
 - In legacy article mode, if no relevant article is found, the run is skipped with a warning and exits successfully.
-- If no repostable LinkedIn post candidates are found, the run is skipped with a warning and exits successfully.
-- If all repost candidates are older than `MAX_REPOST_AGE_DAYS` (or their age cannot be derived from URL/URN IDs), the run is skipped with a warning and exits successfully.
-- If all discovered repost candidates were used recently (cooldown history hit), the run is skipped with a warning to avoid duplicates.
-- If all repost attempts fail (invalid parent/private post/permissions), the script prints the last API error body and exits non-zero, so GitHub Actions marks the run as failed.
+- If no repostable LinkedIn post candidates are found, article fallback mode runs (when `DIRECT_REPOST_ARTICLE_FALLBACK=true`); otherwise the run is skipped.
+- If all repost candidates are older than `MAX_REPOST_AGE_DAYS` (or their age cannot be derived from URL/URN IDs), article fallback mode runs (when enabled); otherwise the run is skipped.
+- If all discovered repost candidates were used recently (cooldown history hit), article fallback mode runs (when enabled); otherwise the run is skipped.
+- If all repost attempts fail (invalid parent/private post/permissions), article fallback mode runs (when enabled); otherwise the script exits non-zero.
 - If every repost attempt returns `403`, the script logs an explicit permission warning to speed up LinkedIn access troubleshooting.
 
 ## Notes
