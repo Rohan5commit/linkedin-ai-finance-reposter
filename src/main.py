@@ -807,12 +807,50 @@ def extract_linkedin_post_urls_from_duckduckgo_html(html_body: str) -> list[str]
     return unique_preserve_order([normalize_linkedin_post_url(url) for url in extracted_urls if url.strip()])
 
 
+def build_article_matched_repost_queries(max_queries: int = 8) -> list[tuple[str, str]]:
+    article_candidates = collect_candidates()
+    if not article_candidates:
+        return []
+
+    now = datetime.now(timezone.utc)
+    queries: list[tuple[str, str]] = []
+    seen_phrases: set[str] = set()
+
+    for candidate in sorted(article_candidates, key=lambda item: item.score, reverse=True):
+        if candidate.published_at is not None and (now - candidate.published_at) > timedelta(days=7):
+            continue
+
+        phrase = truncate_words(clean_text(candidate.title), 10)
+        if len(phrase.split()) < 3:
+            continue
+
+        phrase_key = phrase.lower()
+        if phrase_key in seen_phrases:
+            continue
+        seen_phrases.add(phrase_key)
+
+        topic = candidate.topic if candidate.topic != "general" else "ai-finance"
+        query_text = f'site:linkedin.com/posts "{phrase}" when:7d'
+        queries.append((topic, query_text))
+        if len(queries) >= max_queries:
+            break
+
+    if queries:
+        log("INFO", f"Generated {len(queries)} article-matched LinkedIn search queries.")
+    return queries
+
+
 def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RESULT_LIMIT) -> list[RepostCandidate]:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; linkedin-ai-finance-reposter/1.0)"}
 
     candidates_by_urn: dict[str, RepostCandidate] = {}
 
-    for query_topic, query_text in DIRECT_REPOST_QUERIES:
+    search_queries = list(DIRECT_REPOST_QUERIES)
+    article_match_queries = build_article_matched_repost_queries()
+    if article_match_queries:
+        search_queries.extend(article_match_queries)
+
+    for query_topic, query_text in search_queries:
         response_body = fetch_duckduckgo_results_html(query_topic, query_text, headers)
         if not response_body:
             continue
