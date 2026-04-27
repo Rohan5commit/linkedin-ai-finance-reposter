@@ -1710,145 +1710,7 @@ def post_to_linkedin(
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Auto-repost trending AI and finance news to LinkedIn.")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Fetch and generate a post, but do not publish to LinkedIn.",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Optional random seed for deterministic local testing.",
-    )
-    parser.add_argument(
-        "--ignore-random-schedule",
-        action="store_true",
-        help="Run immediately even if today's scheduled random weekday gate would skip.",
-    )
-    args = parser.parse_args()
-
-    load_dotenv()
-    if args.seed is not None:
-        random.seed(args.seed)
-    is_dry_run = args.dry_run or os.getenv("DRY_RUN", "").strip().lower() == "true"
-    direct_repost_only = os.getenv("LINKEDIN_DIRECT_REPOST_ONLY", "true").strip().lower() != "false"
-    randomize_weekly_run_days = os.getenv("RANDOMIZE_WEEKLY_RUN_DAYS", "true").strip().lower() != "false"
-    event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower()
-    repost_history_file = (
-        os.getenv("REPOST_HISTORY_FILE", DEFAULT_REPOST_HISTORY_FILE).strip()
-        or DEFAULT_REPOST_HISTORY_FILE
-    )
-    repost_history_max_entries = parse_positive_int_env(
-        "REPOST_HISTORY_MAX_ENTRIES",
-        DEFAULT_REPOST_HISTORY_MAX_ENTRIES,
-    )
-    repost_cooldown_posts = parse_positive_int_env("REPOST_COOLDOWN_POSTS", DEFAULT_REPOST_COOLDOWN_POSTS)
-    max_repost_age_days = parse_max_repost_age_days_env()
-
-    if randomize_weekly_run_days and event_name == "schedule" and not args.ignore_random_schedule:
-        now_utc = datetime.now(timezone.utc)
-        seed_material = (
-            os.getenv("RANDOM_SCHEDULE_SEED", "").strip()
-            or os.getenv("GITHUB_REPOSITORY", "").strip()
-            or "linkedin-ai-finance-reposter"
-        )
-        selected_days = weekly_random_run_days(seed_material, now_utc)
-        today = now_utc.weekday()
-        selected_day_labels = [WEEKDAY_NAMES[day] for day in selected_days]
-        log(
-            "INFO",
-            f"Weekly random schedule days: {', '.join(selected_day_labels)} | today={WEEKDAY_NAMES[today]}",
-        )
-        if today not in selected_days:
-            log("INFO", "Today is not one of this week's selected random run days; skipping.")
-            return 0
-
-    if direct_repost_only:
-        log("INFO", "Direct repost mode enabled. Discovering public LinkedIn posts...")
-        repost_candidates = fetch_linkedin_repost_candidates()
-        if not repost_candidates:
-            log("WARN", "No repostable LinkedIn post candidates found; skipping this run.")
-            return 0
-        repost_candidates = filter_repost_candidates_by_freshness(repost_candidates, max_repost_age_days)
-        if not repost_candidates:
-            log(
-                "WARN",
-                "All discovered repost candidates were older than the freshness window or had unknown age; "
-                f"skipping this run (MAX_REPOST_AGE_DAYS={max_repost_age_days}).",
-            )
-            return 0
-        repost_candidates = prioritize_repost_candidates_for_run(repost_candidates)
-        recent_parent_urns = load_repost_history(repost_history_file, repost_history_max_entries)
-        if recent_parent_urns:
-            log(
-                "INFO",
-                f"Loaded repost history entries={len(recent_parent_urns)} from {repost_history_file}.",
-            )
-            recent_urn_set = recent_parent_urn_window(recent_parent_urns, repost_cooldown_posts)
-            before_count = len(repost_candidates)
-            repost_candidates = [
-                candidate
-                for candidate in repost_candidates
-                if not any(urn in recent_urn_set for urn in candidate.parent_urn_candidates)
-            ]
-            filtered_count = before_count - len(repost_candidates)
-            if filtered_count > 0:
-                log(
-                    "INFO",
-                    f"History pre-filter removed {filtered_count} URL-derived candidate(s) "
-                    f"(cooldown={min(repost_cooldown_posts, len(recent_parent_urns))}).",
-                )
-        else:
-            log("INFO", f"No repost history found at {repost_history_file}; starting with an empty history.")
-
-        if not repost_candidates:
-            log(
-                "WARN",
-                "All current repost candidates are in the recent history cooldown window; "
-                "skipping this run to avoid duplicates.",
-            )
-            return 0
-
-        top_candidate = repost_candidates[0]
-        top_commentary = build_direct_reshare_commentary(top_candidate)
-        age_days = None
-        if top_candidate.inferred_created_at is not None:
-            age_days = (datetime.now(timezone.utc) - top_candidate.inferred_created_at).total_seconds() / 86400.0
-        log(
-            "INFO",
-            f"Top direct repost candidate: '{top_candidate.title}' ({top_candidate.source}) | "
-            f"score={top_candidate.score:.1f} | urn_options={len(top_candidate.parent_urn_candidates)}"
-            + (f" | age_days={age_days:.1f}" if age_days is not None else ""),
-        )
-
-        if is_dry_run:
-            print("\n--- Direct Repost Preview ---\n")
-            print(top_commentary)
-            print(f"\nSource post URL: {top_candidate.url}")
-            print("Parent URN attempts:")
-            for parent_urn in top_candidate.parent_urn_candidates:
-                print(f"- {parent_urn}")
-            return 0
-
-        linkedin_token = os.getenv("LINKEDIN_TOKEN", "").strip()
-        linkedin_person_urn = os.getenv("LINKEDIN_PERSON_URN", "").strip()
-        if not linkedin_token or not linkedin_person_urn:
-            log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
-            return 1
-
-        return publish_direct_repost(
-            repost_candidates[:15],
-            linkedin_token,
-            linkedin_person_urn,
-            recent_parent_urns=recent_parent_urns,
-            cooldown_posts=repost_cooldown_posts,
-            history_file_path=repost_history_file,
-            history_max_entries=repost_history_max_entries,
-        )
-
+def run_article_post_flow(is_dry_run: bool) -> int:
     log("INFO", "Collecting candidates from RSS feeds and Hacker News...")
     candidates = collect_candidates()
     selected = choose_top_article(candidates)
@@ -1891,6 +1753,164 @@ def main() -> int:
     log("INFO", "LinkedIn post created successfully.")
     print(response.text)
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Auto-repost trending AI and finance news to LinkedIn.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Fetch and generate a post, but do not publish to LinkedIn.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Optional random seed for deterministic local testing.",
+    )
+    parser.add_argument(
+        "--ignore-random-schedule",
+        action="store_true",
+        help="Run immediately even if today's scheduled random weekday gate would skip.",
+    )
+    args = parser.parse_args()
+
+    load_dotenv()
+    if args.seed is not None:
+        random.seed(args.seed)
+    is_dry_run = args.dry_run or os.getenv("DRY_RUN", "").strip().lower() == "true"
+    direct_repost_only = os.getenv("LINKEDIN_DIRECT_REPOST_ONLY", "true").strip().lower() != "false"
+    randomize_weekly_run_days = os.getenv("RANDOMIZE_WEEKLY_RUN_DAYS", "true").strip().lower() != "false"
+    event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower()
+    repost_history_file = (
+        os.getenv("REPOST_HISTORY_FILE", DEFAULT_REPOST_HISTORY_FILE).strip()
+        or DEFAULT_REPOST_HISTORY_FILE
+    )
+    repost_history_max_entries = parse_positive_int_env(
+        "REPOST_HISTORY_MAX_ENTRIES",
+        DEFAULT_REPOST_HISTORY_MAX_ENTRIES,
+    )
+    repost_cooldown_posts = parse_positive_int_env("REPOST_COOLDOWN_POSTS", DEFAULT_REPOST_COOLDOWN_POSTS)
+    max_repost_age_days = parse_max_repost_age_days_env()
+    direct_repost_article_fallback = os.getenv("DIRECT_REPOST_ARTICLE_FALLBACK", "true").strip().lower() != "false"
+
+    if randomize_weekly_run_days and event_name == "schedule" and not args.ignore_random_schedule:
+        now_utc = datetime.now(timezone.utc)
+        seed_material = (
+            os.getenv("RANDOM_SCHEDULE_SEED", "").strip()
+            or os.getenv("GITHUB_REPOSITORY", "").strip()
+            or "linkedin-ai-finance-reposter"
+        )
+        selected_days = weekly_random_run_days(seed_material, now_utc)
+        today = now_utc.weekday()
+        selected_day_labels = [WEEKDAY_NAMES[day] for day in selected_days]
+        log(
+            "INFO",
+            f"Weekly random schedule days: {', '.join(selected_day_labels)} | today={WEEKDAY_NAMES[today]}",
+        )
+        if today not in selected_days:
+            log("INFO", "Today is not one of this week's selected random run days; skipping.")
+            return 0
+
+    if direct_repost_only:
+        log("INFO", "Direct repost mode enabled. Discovering public LinkedIn posts...")
+        repost_candidates = fetch_linkedin_repost_candidates()
+        if not repost_candidates:
+            log("WARN", "No repostable LinkedIn post candidates found.")
+            if direct_repost_article_fallback:
+                log("WARN", "Falling back to article mode to keep posting cadence.")
+                return run_article_post_flow(is_dry_run)
+            log("WARN", "Skipping this run because fallback mode is disabled.")
+            return 0
+        repost_candidates = filter_repost_candidates_by_freshness(repost_candidates, max_repost_age_days)
+        if not repost_candidates:
+            log(
+                "WARN",
+                "All discovered repost candidates were older than the freshness window or had unknown age; "
+                f"MAX_REPOST_AGE_DAYS={max_repost_age_days}.",
+            )
+            if direct_repost_article_fallback:
+                log("WARN", "Falling back to article mode to keep posting cadence.")
+                return run_article_post_flow(is_dry_run)
+            log("WARN", "Skipping this run because fallback mode is disabled.")
+            return 0
+        repost_candidates = prioritize_repost_candidates_for_run(repost_candidates)
+        recent_parent_urns = load_repost_history(repost_history_file, repost_history_max_entries)
+        if recent_parent_urns:
+            log(
+                "INFO",
+                f"Loaded repost history entries={len(recent_parent_urns)} from {repost_history_file}.",
+            )
+            recent_urn_set = recent_parent_urn_window(recent_parent_urns, repost_cooldown_posts)
+            before_count = len(repost_candidates)
+            repost_candidates = [
+                candidate
+                for candidate in repost_candidates
+                if not any(urn in recent_urn_set for urn in candidate.parent_urn_candidates)
+            ]
+            filtered_count = before_count - len(repost_candidates)
+            if filtered_count > 0:
+                log(
+                    "INFO",
+                    f"History pre-filter removed {filtered_count} URL-derived candidate(s) "
+                    f"(cooldown={min(repost_cooldown_posts, len(recent_parent_urns))}).",
+                )
+        else:
+            log("INFO", f"No repost history found at {repost_history_file}; starting with an empty history.")
+
+        if not repost_candidates:
+            log(
+                "WARN",
+                "All current repost candidates are in the recent history cooldown window.",
+            )
+            if direct_repost_article_fallback:
+                log("WARN", "Falling back to article mode to keep posting cadence.")
+                return run_article_post_flow(is_dry_run)
+            log("WARN", "Skipping this run because fallback mode is disabled.")
+            return 0
+
+        top_candidate = repost_candidates[0]
+        top_commentary = build_direct_reshare_commentary(top_candidate)
+        age_days = None
+        if top_candidate.inferred_created_at is not None:
+            age_days = (datetime.now(timezone.utc) - top_candidate.inferred_created_at).total_seconds() / 86400.0
+        log(
+            "INFO",
+            f"Top direct repost candidate: '{top_candidate.title}' ({top_candidate.source}) | "
+            f"score={top_candidate.score:.1f} | urn_options={len(top_candidate.parent_urn_candidates)}"
+            + (f" | age_days={age_days:.1f}" if age_days is not None else ""),
+        )
+
+        if is_dry_run:
+            print("\n--- Direct Repost Preview ---\n")
+            print(top_commentary)
+            print(f"\nSource post URL: {top_candidate.url}")
+            print("Parent URN attempts:")
+            for parent_urn in top_candidate.parent_urn_candidates:
+                print(f"- {parent_urn}")
+            return 0
+
+        linkedin_token = os.getenv("LINKEDIN_TOKEN", "").strip()
+        linkedin_person_urn = os.getenv("LINKEDIN_PERSON_URN", "").strip()
+        if not linkedin_token or not linkedin_person_urn:
+            log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
+            return 1
+
+        direct_result = publish_direct_repost(
+            repost_candidates[:15],
+            linkedin_token,
+            linkedin_person_urn,
+            recent_parent_urns=recent_parent_urns,
+            cooldown_posts=repost_cooldown_posts,
+            history_file_path=repost_history_file,
+            history_max_entries=repost_history_max_entries,
+        )
+        if direct_result != 0 and direct_repost_article_fallback:
+            log("WARN", "Direct repost publish failed; falling back to article mode.")
+            return run_article_post_flow(is_dry_run)
+        return direct_result
+
+    return run_article_post_flow(is_dry_run)
 
 
 if __name__ == "__main__":
