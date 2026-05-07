@@ -7,6 +7,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Discovers candidate public LinkedIn posts via free web search (`duckduckgo.com/html` fetched through `r.jina.ai`) constrained to `linkedin.com/posts` and AI/tech/finance queries.
 - Extracts candidate parent URNs from public LinkedIn page metadata (`urn:li:share:*` / `urn:li:ugcPost:*`) and ranks them against the URL activity ID.
 - Filters and ranks candidates for topical relevance and recency-style search ranking.
+- Filters out personal career/job-change announcements (for example "I'm excited to announce my new role...") so reposts stay news-focused.
 - Enforces a strict direct-repost freshness gate: only candidates with derivable LinkedIn IDs newer than or equal to 7 days (configurable) are eligible.
 - Publishes a **true direct repost** by trying:
   - LinkedIn Posts API (`POST /rest/posts`, `reshareContext.parent`)
