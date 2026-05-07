@@ -172,6 +172,32 @@ MARKET_RECAP_PATTERNS = (
     r"\b(stocks|shares).*(rise|fall|mixed|edge|close|closed)\b",
 )
 
+PERSONAL_JOB_SIGNAL_TERMS = (
+    "new role",
+    "new position",
+    "excited to announce",
+    "thrilled to announce",
+    "happy to share",
+    "delighted to share",
+    "joined as",
+    "joining as",
+    "joined ",
+    "joining ",
+    "starting as",
+    "starting my",
+    "promoted to",
+    "promotion",
+    "appointed as",
+)
+
+PERSONAL_FIRST_PERSON_TERMS = (
+    " i ",
+    " i'm ",
+    " i’m ",
+    " my ",
+    " me ",
+)
+
 BLOCKLIST_TERMS = (
     "kill",
     "killed",
@@ -876,6 +902,9 @@ def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RE
             title = build_title_from_linkedin_post_url(target_url)
             if contains_blocklisted_terms(title):
                 continue
+            if is_personal_job_announcement(title):
+                log("INFO", f"Skipping personal job-update candidate: title='{title}'")
+                continue
 
             combined_text = f"{title} {query_text}".lower()
             topic, keyword_points = detect_topic(combined_text)
@@ -975,6 +1004,16 @@ def contains_blocklisted_terms(text: str) -> bool:
         if re.search(pattern, lower_text):
             return True
     return False
+
+
+def is_personal_job_announcement(text: str) -> bool:
+    normalized = f" {clean_text(text).lower()} "
+    if not normalized.strip():
+        return False
+
+    has_job_signal = any(term in normalized for term in PERSONAL_JOB_SIGNAL_TERMS)
+    has_first_person_signal = any(term in normalized for term in PERSONAL_FIRST_PERSON_TERMS)
+    return has_job_signal and has_first_person_signal
 
 
 def is_market_recap(text: str) -> bool:
