@@ -39,6 +39,9 @@ DIRECT_REPOST_RESULT_LIMIT = 20
 DEFAULT_REPOST_HISTORY_FILE = ".cache/repost_history.json"
 DEFAULT_REPOST_HISTORY_MAX_ENTRIES = 250
 DEFAULT_REPOST_COOLDOWN_POSTS = 80
+DEFAULT_ARTICLE_HISTORY_FILE = ".cache/article_history.json"
+DEFAULT_ARTICLE_HISTORY_MAX_ENTRIES = 250
+DEFAULT_ARTICLE_COOLDOWN_POSTS = 80
 DEFAULT_MAX_REPOST_AGE_DAYS = 7
 MAX_REPOST_AGE_DAYS_MIN = 1
 MAX_REPOST_AGE_DAYS_MAX = 365
@@ -196,6 +199,38 @@ PERSONAL_FIRST_PERSON_TERMS = (
     " i’m ",
     " my ",
     " me ",
+)
+
+PERSONAL_ACHIEVEMENT_SIGNAL_TERMS = (
+    "certificate",
+    "certification",
+    "certified",
+    "award",
+    "awarded",
+    "honored",
+    "honoured",
+    "grateful",
+    "proud to share",
+    "completed",
+    "completion",
+    "graduated",
+)
+
+PROMOTIONAL_SIGNAL_TERMS = (
+    "introducing",
+    "learn more",
+    "register now",
+    "sign up",
+    "join us",
+    "webinar",
+    "workshop",
+    "demo",
+    "book a demo",
+    "our solution",
+    "managed services",
+    "case study",
+    "whitepaper",
+    "newsletter",
 )
 
 BLOCKLIST_TERMS = (
@@ -512,6 +547,80 @@ def recent_parent_urn_window(recent_parent_urns: list[str], cooldown_posts: int)
     if cooldown_posts <= 0:
         return set()
     return set(recent_parent_urns[-cooldown_posts:])
+
+
+def normalize_article_url_for_history(raw_url: str) -> str:
+    cleaned = html.unescape((raw_url or "").strip())
+    if not cleaned:
+        return ""
+
+    parsed = urlparse(cleaned)
+    if not parsed.scheme or not parsed.netloc:
+        return clean_text(cleaned).lower()
+
+    filtered_query: list[tuple[str, str]] = []
+    for key, values in parse_qs(parsed.query, keep_blank_values=True).items():
+        if key.lower().startswith("utm_") or key.lower() in {"trk", "ref", "source"}:
+            continue
+        for value in values:
+            filtered_query.append((key, value))
+
+    query = urlencode(filtered_query)
+    normalized_path = re.sub(r"/+", "/", parsed.path or "/")
+    normalized_path = re.sub(r"/$", "", normalized_path) or "/"
+    normalized = parsed._replace(
+        scheme=parsed.scheme.lower(),
+        netloc=parsed.netloc.lower(),
+        path=normalized_path,
+        query=query,
+        fragment="",
+    )
+    return normalized.geturl()
+
+
+def load_article_history(file_path: str, max_entries: int) -> list[str]:
+    if not file_path or not os.path.exists(file_path):
+        return []
+    try:
+        with open(file_path, "r", encoding="utf-8") as history_file:
+            payload = json.load(history_file)
+    except (OSError, ValueError) as error:
+        log("WARN", f"Failed to load article history from {file_path} ({error}).")
+        return []
+
+    key_values = payload.get("recent_article_keys", [])
+    if not isinstance(key_values, list):
+        return []
+
+    cleaned_keys = [
+        key.strip()
+        for key in key_values
+        if isinstance(key, str) and key.strip()
+    ]
+    return unique_preserve_order(cleaned_keys)[-max_entries:]
+
+
+def save_article_history(file_path: str, recent_article_keys: list[str], max_entries: int) -> None:
+    directory = os.path.dirname(file_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    deduped_keys = unique_preserve_order(
+        [key for key in recent_article_keys if isinstance(key, str) and key.strip()]
+    )
+    payload = {
+        "recent_article_keys": deduped_keys[-max_entries:],
+        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    with open(file_path, "w", encoding="utf-8") as history_file:
+        json.dump(payload, history_file, ensure_ascii=True, indent=2)
+        history_file.write("\n")
+
+
+def recent_article_key_window(recent_article_keys: list[str], cooldown_posts: int) -> set[str]:
+    if cooldown_posts <= 0:
+        return set()
+    return set(recent_article_keys[-cooldown_posts:])
 
 
 def clean_text(raw: str) -> str:
@@ -905,6 +1014,12 @@ def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RE
             if is_personal_job_announcement(title):
                 log("INFO", f"Skipping personal job-update candidate: title='{title}'")
                 continue
+            if is_personal_achievement_update(title):
+                log("INFO", f"Skipping personal achievement candidate: title='{title}'")
+                continue
+            if is_promotional_non_news_post(title):
+                log("INFO", f"Skipping promotional non-news candidate: title='{title}'")
+                continue
 
             combined_text = f"{title} {query_text}".lower()
             topic, keyword_points = detect_topic(combined_text)
@@ -1014,6 +1129,26 @@ def is_personal_job_announcement(text: str) -> bool:
     has_job_signal = any(term in normalized for term in PERSONAL_JOB_SIGNAL_TERMS)
     has_first_person_signal = any(term in normalized for term in PERSONAL_FIRST_PERSON_TERMS)
     return has_job_signal and has_first_person_signal
+
+
+def is_personal_achievement_update(text: str) -> bool:
+    normalized = f" {clean_text(text).lower()} "
+    if not normalized.strip():
+        return False
+
+    has_achievement_signal = any(term in normalized for term in PERSONAL_ACHIEVEMENT_SIGNAL_TERMS)
+    has_first_person_signal = any(term in normalized for term in PERSONAL_FIRST_PERSON_TERMS)
+    return has_achievement_signal and has_first_person_signal
+
+
+def is_promotional_non_news_post(text: str) -> bool:
+    normalized = f" {clean_text(text).lower()} "
+    if not normalized.strip():
+        return False
+
+    has_promotional_signal = any(term in normalized for term in PROMOTIONAL_SIGNAL_TERMS)
+    has_news_signal = keyword_hit_count(normalized, NEWS_EVENT_KEYWORDS) > 0
+    return has_promotional_signal and not has_news_signal
 
 
 def is_market_recap(text: str) -> bool:
@@ -1749,14 +1884,39 @@ def post_to_linkedin(
     )
 
 
-def run_article_post_flow(is_dry_run: bool) -> int:
+def run_article_post_flow(
+    is_dry_run: bool,
+    article_history_file: str,
+    article_history_max_entries: int,
+    article_cooldown_posts: int,
+) -> int:
     log("INFO", "Collecting candidates from RSS feeds and Hacker News...")
     candidates = collect_candidates()
+
+    recent_article_keys = load_article_history(article_history_file, article_history_max_entries)
+    recent_article_set = recent_article_key_window(recent_article_keys, article_cooldown_posts)
+    if recent_article_set:
+        before_count = len(candidates)
+        candidates = [
+            candidate
+            for candidate in candidates
+            if normalize_article_url_for_history(candidate.url) not in recent_article_set
+        ]
+        filtered_count = before_count - len(candidates)
+        if filtered_count > 0:
+            log(
+                "INFO",
+                f"Article history pre-filter removed {filtered_count} candidate(s) "
+                f"(cooldown={min(article_cooldown_posts, len(recent_article_keys))}).",
+            )
+
     selected = choose_top_article(candidates)
 
     if not selected:
         log("WARN", "No relevant AI/finance article found; skipping this run.")
         return 0
+
+    selected_article_key = normalize_article_url_for_history(selected.url)
 
     profile = choose_length_profile()
     post_text = build_post(selected, profile)
@@ -1788,6 +1948,17 @@ def run_article_post_flow(is_dry_run: bool) -> int:
         log("ERROR", f"LinkedIn API failed with HTTP {response.status_code}")
         print(response.text)
         return 1
+
+    if selected_article_key:
+        updated_article_history = unique_preserve_order(recent_article_keys + [selected_article_key])[
+            -article_history_max_entries:
+        ]
+        try:
+            save_article_history(article_history_file, updated_article_history, article_history_max_entries)
+        except OSError as error:
+            log("WARN", f"Article post succeeded but failed to persist history ({error}).")
+        else:
+            log("INFO", f"Persisted article history: {len(updated_article_history)} entries.")
 
     log("INFO", "LinkedIn post created successfully.")
     print(response.text)
@@ -1830,6 +2001,15 @@ def main() -> int:
         DEFAULT_REPOST_HISTORY_MAX_ENTRIES,
     )
     repost_cooldown_posts = parse_positive_int_env("REPOST_COOLDOWN_POSTS", DEFAULT_REPOST_COOLDOWN_POSTS)
+    article_history_file = (
+        os.getenv("ARTICLE_HISTORY_FILE", DEFAULT_ARTICLE_HISTORY_FILE).strip()
+        or DEFAULT_ARTICLE_HISTORY_FILE
+    )
+    article_history_max_entries = parse_positive_int_env(
+        "ARTICLE_HISTORY_MAX_ENTRIES",
+        DEFAULT_ARTICLE_HISTORY_MAX_ENTRIES,
+    )
+    article_cooldown_posts = parse_positive_int_env("ARTICLE_COOLDOWN_POSTS", DEFAULT_ARTICLE_COOLDOWN_POSTS)
     max_repost_age_days = parse_max_repost_age_days_env()
     direct_repost_article_fallback = os.getenv("DIRECT_REPOST_ARTICLE_FALLBACK", "true").strip().lower() != "false"
 
@@ -1858,7 +2038,12 @@ def main() -> int:
             log("WARN", "No repostable LinkedIn post candidates found.")
             if direct_repost_article_fallback:
                 log("WARN", "Falling back to article mode to keep posting cadence.")
-                return run_article_post_flow(is_dry_run)
+                return run_article_post_flow(
+                    is_dry_run,
+                    article_history_file,
+                    article_history_max_entries,
+                    article_cooldown_posts,
+                )
             log("WARN", "Skipping this run because fallback mode is disabled.")
             return 0
         repost_candidates = filter_repost_candidates_by_freshness(repost_candidates, max_repost_age_days)
@@ -1870,7 +2055,12 @@ def main() -> int:
             )
             if direct_repost_article_fallback:
                 log("WARN", "Falling back to article mode to keep posting cadence.")
-                return run_article_post_flow(is_dry_run)
+                return run_article_post_flow(
+                    is_dry_run,
+                    article_history_file,
+                    article_history_max_entries,
+                    article_cooldown_posts,
+                )
             log("WARN", "Skipping this run because fallback mode is disabled.")
             return 0
         repost_candidates = prioritize_repost_candidates_for_run(repost_candidates)
@@ -1904,7 +2094,12 @@ def main() -> int:
             )
             if direct_repost_article_fallback:
                 log("WARN", "Falling back to article mode to keep posting cadence.")
-                return run_article_post_flow(is_dry_run)
+                return run_article_post_flow(
+                    is_dry_run,
+                    article_history_file,
+                    article_history_max_entries,
+                    article_cooldown_posts,
+                )
             log("WARN", "Skipping this run because fallback mode is disabled.")
             return 0
 
@@ -1946,10 +2141,20 @@ def main() -> int:
         )
         if direct_result != 0 and direct_repost_article_fallback:
             log("WARN", "Direct repost publish failed; falling back to article mode.")
-            return run_article_post_flow(is_dry_run)
+            return run_article_post_flow(
+                    is_dry_run,
+                    article_history_file,
+                    article_history_max_entries,
+                    article_cooldown_posts,
+                )
         return direct_result
 
-    return run_article_post_flow(is_dry_run)
+    return run_article_post_flow(
+                    is_dry_run,
+                    article_history_file,
+                    article_history_max_entries,
+                    article_cooldown_posts,
+                )
 
 
 if __name__ == "__main__":
