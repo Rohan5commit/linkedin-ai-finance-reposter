@@ -233,6 +233,25 @@ PROMOTIONAL_SIGNAL_TERMS = (
     "newsletter",
 )
 
+JOB_ROLE_SIGNAL_TERMS = (
+    "hiring",
+    "we are hiring",
+    "we're hiring",
+    "job opening",
+    "open role",
+    "open position",
+    "apply now",
+    "careers",
+    "career",
+    "software engineer",
+    "developer",
+    "account executive",
+    "product manager",
+    "data scientist",
+    "machine learning engineer",
+    "engineering manager",
+)
+
 BLOCKLIST_TERMS = (
     "kill",
     "killed",
@@ -1020,6 +1039,9 @@ def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RE
             if is_promotional_non_news_post(title):
                 log("INFO", f"Skipping promotional non-news candidate: title='{title}'")
                 continue
+            if is_job_or_career_post(title):
+                log("INFO", f"Skipping job/career candidate: title='{title}'")
+                continue
 
             combined_text = f"{title} {query_text}".lower()
             topic, keyword_points = detect_topic(combined_text)
@@ -1149,6 +1171,16 @@ def is_promotional_non_news_post(text: str) -> bool:
     has_promotional_signal = any(term in normalized for term in PROMOTIONAL_SIGNAL_TERMS)
     has_news_signal = keyword_hit_count(normalized, NEWS_EVENT_KEYWORDS) > 0
     return has_promotional_signal and not has_news_signal
+
+
+def is_job_or_career_post(text: str) -> bool:
+    normalized = f" {clean_text(text).lower()} "
+    if not normalized.strip():
+        return False
+
+    has_job_signal = any(term in normalized for term in JOB_ROLE_SIGNAL_TERMS)
+    has_news_signal = keyword_hit_count(normalized, NEWS_EVENT_KEYWORDS) > 0
+    return has_job_signal and not has_news_signal
 
 
 def is_market_recap(text: str) -> bool:
