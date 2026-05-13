@@ -7,7 +7,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Discovers candidate public LinkedIn posts via free web search (`duckduckgo.com/html` fetched through `r.jina.ai`) constrained to `linkedin.com/posts` and AI/tech/finance queries.
 - Extracts candidate parent URNs from public LinkedIn page metadata (`urn:li:share:*` / `urn:li:ugcPost:*`) and ranks them against the URL activity ID.
 - Filters and ranks candidates for topical relevance and recency-style search ranking.
-- Filters out personal career/job-change announcements (for example "I'm excited to announce my new role...") so reposts stay news-focused.
+- Filters out personal career/job-change updates, personal achievement/certificate updates, and promotional non-news posts so reposts stay major-news-focused.
 - Enforces a strict direct-repost freshness gate: only candidates with derivable LinkedIn IDs newer than or equal to 7 days (configurable) are eligible.
 - Publishes a **true direct repost** by trying:
   - LinkedIn Posts API (`POST /rest/posts`, `reshareContext.parent`)
@@ -17,7 +17,7 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
 - If direct repost discovery fails, freshness filtering eliminates all candidates, or repost publish fails, the run falls back to posting a fresh AI/finance article so cadence is maintained.
 - Applies run-based candidate rotation plus persistent repost-history cooldown filtering to prevent heavy repeats.
-- Persists recent repost parent URNs across workflow runs using GitHub Actions cache (`.cache/repost_history.json`).
+- Persists repost and article cooldown history across workflow runs using GitHub Actions cache (`.cache/`).
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
 
 ## Repository structure
@@ -167,11 +167,14 @@ Mode switch:
 - `REPOST_HISTORY_FILE=.cache/repost_history.json`: file used for cross-run repost memory
 - `REPOST_HISTORY_MAX_ENTRIES=500`: max parent URNs retained in history
 - `REPOST_COOLDOWN_POSTS=120`: most-recent reposts blocked from reuse
+- `ARTICLE_HISTORY_FILE=.cache/article_history.json`: file used for cross-run article memory
+- `ARTICLE_HISTORY_MAX_ENTRIES=500`: max article URLs retained in history
+- `ARTICLE_COOLDOWN_POSTS=120`: most-recent article URLs blocked from reuse
 - `MAX_REPOST_AGE_DAYS=7`: maximum candidate age for direct reposts; candidates older than this (or with unknown age) are skipped
 
 ## Error handling behavior
 
-- In legacy article mode, if no relevant article is found, the run is skipped with a warning and exits successfully.
+- In legacy article mode, if no relevant article remains after article cooldown filtering, the run is skipped with a warning and exits successfully.
 - If no repostable LinkedIn post candidates are found, article fallback mode runs (when `DIRECT_REPOST_ARTICLE_FALLBACK=true`); otherwise the run is skipped.
 - If all repost candidates are older than `MAX_REPOST_AGE_DAYS` (or their age cannot be derived from URL/URN IDs), article fallback mode runs (when enabled); otherwise the run is skipped.
 - If all discovered repost candidates were used recently (cooldown history hit), article fallback mode runs (when enabled); otherwise the run is skipped.
