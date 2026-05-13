@@ -22,7 +22,7 @@ jobs:
       - name: Restore repost history cache
         uses: actions/cache@v4
         with:
-          path: .cache/repost_history.json
+          path: .cache
           key: repost-history-${{ github.ref_name }}-${{ github.run_number }}
           restore-keys: |
             repost-history-${{ github.ref_name }}-
@@ -51,6 +51,9 @@ jobs:
           REPOST_HISTORY_FILE: .cache/repost_history.json
           REPOST_HISTORY_MAX_ENTRIES: "500"
           REPOST_COOLDOWN_POSTS: "120"
+          ARTICLE_HISTORY_FILE: .cache/article_history.json
+          ARTICLE_HISTORY_MAX_ENTRIES: "500"
+          ARTICLE_COOLDOWN_POSTS: "120"
           MAX_REPOST_AGE_DAYS: "7"
         run: python src/main.py
 
