@@ -50,7 +50,7 @@ It records **what was done**, **why those choices were made**, and **what to do 
     - tracks recently reposted parent URNs in `.cache/repost_history.json`
     - blocks candidates that hit the recent cooldown window
     - persists history across runs via GitHub Actions cache restore/save
-    - cleanly skips runs (success) when all candidates are recently used, instead of reposting duplicates
+    - if all direct repost candidates are recently used, the run now falls back to article mode when fallback is enabled instead of silently succeeding with no post
 21. Removed AI-sounding direct-repost prose by adding `DIRECT_REPOST_COMMENTARY_STYLE` and setting workflow default to no text (`none`).
 22. Added strict direct-repost freshness filtering using LinkedIn ID-derived timestamps (`epoch_ms = id >> 22`) so only candidates within `MAX_REPOST_AGE_DAYS` (default: 7) are eligible; unknown-age candidates are skipped.
 
@@ -149,7 +149,8 @@ No secrets are stored in committed files.
 4. Direct repost now works with page-derived parent URNs + API fallback. Keep the 403 diagnostic in place because permissions/target visibility can still cause failures on specific posts.
 5. Search discovery via `r.jina.ai` can intermittently return HTTP 451; fallback URL list is in place to avoid full-run skips.
 6. During aggressive manual burst testing, repeated reposts can happen if history persistence is disabled/missing; keep cache + history env vars enabled.
-7. Direct repost mode now enforces a one-week freshness window by default (`MAX_REPOST_AGE_DAYS=7`); if all candidates are stale or age-unknown, the run skips successfully.
+7. Direct repost mode now enforces a one-week freshness window by default (`MAX_REPOST_AGE_DAYS=7`); if all candidates are stale, age-unknown, or recently used, article fallback should keep cadence when `DIRECT_REPOST_ARTICLE_FALLBACK=true`.
+8. Article cooldown is a preference, not a hard stop: if it filters every current article candidate during fallback, the script relaxes it for that run so the scheduler does not complete successfully without posting.
 
 ## 6) Useful operational commands
 

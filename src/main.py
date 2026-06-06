@@ -45,6 +45,9 @@ DEFAULT_ARTICLE_COOLDOWN_POSTS = 80
 DEFAULT_MAX_REPOST_AGE_DAYS = 7
 MAX_REPOST_AGE_DAYS_MIN = 1
 MAX_REPOST_AGE_DAYS_MAX = 365
+DIRECT_REPOST_SUCCESS = 0
+DIRECT_REPOST_FAILED = 1
+DIRECT_REPOST_NO_UNUSED_CANDIDATES = 2
 
 DIRECT_REPOST_QUERIES = [
     (
@@ -1851,9 +1854,9 @@ def publish_direct_repost(
     if candidates and duplicate_skip_count == len(candidates):
         log(
             "WARN",
-            "All repost candidates were recently used; skipping this run to prevent duplicate reposts.",
+            "All repost candidates were recently used; direct repost cannot publish a new item safely.",
         )
-        return 0
+        return DIRECT_REPOST_NO_UNUSED_CANDIDATES
 
     if attempt_count > 0 and forbidden_count == attempt_count:
         log(
@@ -1867,7 +1870,7 @@ def publish_direct_repost(
     log("ERROR", "Could not create a direct repost from discovered LinkedIn posts.")
     if last_error_body:
         print(last_error_body)
-    return 1
+    return DIRECT_REPOST_FAILED
 
 
 def post_to_linkedin(
@@ -1924,6 +1927,7 @@ def run_article_post_flow(
 ) -> int:
     log("INFO", "Collecting candidates from RSS feeds and Hacker News...")
     candidates = collect_candidates()
+    unfiltered_candidates = list(candidates)
 
     recent_article_keys = load_article_history(article_history_file, article_history_max_entries)
     recent_article_set = recent_article_key_window(recent_article_keys, article_cooldown_posts)
@@ -1941,6 +1945,13 @@ def run_article_post_flow(
                 f"Article history pre-filter removed {filtered_count} candidate(s) "
                 f"(cooldown={min(article_cooldown_posts, len(recent_article_keys))}).",
             )
+        if not candidates and unfiltered_candidates:
+            log(
+                "WARN",
+                "Article cooldown filtered every current candidate; relaxing article cooldown for this run "
+                "so posting cadence is maintained.",
+            )
+            candidates = unfiltered_candidates
 
     selected = choose_top_article(candidates)
 
@@ -2171,14 +2182,21 @@ def main() -> int:
             history_file_path=repost_history_file,
             history_max_entries=repost_history_max_entries,
         )
-        if direct_result != 0 and direct_repost_article_fallback:
-            log("WARN", "Direct repost publish failed; falling back to article mode.")
-            return run_article_post_flow(
+        if direct_result != DIRECT_REPOST_SUCCESS:
+            if direct_repost_article_fallback:
+                if direct_result == DIRECT_REPOST_NO_UNUSED_CANDIDATES:
+                    log("WARN", "No unused direct repost candidates remain; falling back to article mode.")
+                else:
+                    log("WARN", "Direct repost publish failed; falling back to article mode.")
+                return run_article_post_flow(
                     is_dry_run,
                     article_history_file,
                     article_history_max_entries,
                     article_cooldown_posts,
                 )
+            if direct_result == DIRECT_REPOST_NO_UNUSED_CANDIDATES:
+                log("WARN", "Skipping this run because fallback mode is disabled and all reposts are duplicates.")
+                return 0
         return direct_result
 
     return run_article_post_flow(
