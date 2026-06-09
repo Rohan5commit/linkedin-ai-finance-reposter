@@ -15,9 +15,9 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Uses **no text above reposts by default** to avoid AI-sounding commentary.
 - Supports optional modes: hashtags-only, no text, or full commentary.
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
-- If direct repost discovery fails, freshness filtering eliminates all candidates, or repost publish fails, the run falls back to posting a fresh AI/finance article so cadence is maintained.
+- If direct repost discovery fails, freshness filtering eliminates all candidates, all repost candidates are recent duplicates, or repost publish fails, the run falls back to posting an AI/finance article so cadence is maintained.
 - Applies run-based candidate rotation plus persistent repost-history cooldown filtering to prevent heavy repeats.
-- Persists repost and article cooldown history across workflow runs using GitHub Actions cache (`.cache/`).
+- Persists repost and article cooldown history across workflow runs using GitHub Actions cache (`.cache/`). Reused history items are moved to the newest position so cooldown windows remain accurate.
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
 
 ## Repository structure
@@ -169,12 +169,12 @@ Mode switch:
 - `REPOST_COOLDOWN_POSTS=120`: most-recent reposts blocked from reuse
 - `ARTICLE_HISTORY_FILE=.cache/article_history.json`: file used for cross-run article memory
 - `ARTICLE_HISTORY_MAX_ENTRIES=500`: max article URLs retained in history
-- `ARTICLE_COOLDOWN_POSTS=120`: most-recent article URLs blocked from reuse
+- `ARTICLE_COOLDOWN_POSTS=120`: most-recent article URLs blocked from reuse unless every current article candidate is inside the cooldown window
 - `MAX_REPOST_AGE_DAYS=7`: maximum candidate age for direct reposts; candidates older than this (or with unknown age) are skipped
 
 ## Error handling behavior
 
-- In legacy article mode, if no relevant article remains after article cooldown filtering, the run is skipped with a warning and exits successfully.
+- In article mode, article-history cooldown is applied first; if it filters every current candidate, the script relaxes the article cooldown for that run and prefers the oldest recently used matching article to maintain cadence without repeating the same item unnecessarily.
 - If no repostable LinkedIn post candidates are found, article fallback mode runs (when `DIRECT_REPOST_ARTICLE_FALLBACK=true`); otherwise the run is skipped.
 - If all repost candidates are older than `MAX_REPOST_AGE_DAYS` (or their age cannot be derived from URL/URN IDs), article fallback mode runs (when enabled); otherwise the run is skipped.
 - If all discovered repost candidates were used recently (cooldown history hit), article fallback mode runs (when enabled); otherwise the run is skipped.
