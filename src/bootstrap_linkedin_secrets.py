@@ -95,7 +95,8 @@ def build_auth_url(client_id: str, redirect_uri: str, scope: str, state: str) ->
     return "https://www.linkedin.com/oauth/v2/authorization?" + urllib.parse.urlencode(params)
 
 
-def exchange_token(code: str, redirect_uri: str, client_id: str, client_secret: str) -> str:
+def exchange_token(code: str, redirect_uri: str, client_id: str, client_secret: str) -> tuple[str, str]:
+    """Exchange authorization code for access token. Returns (access_token, refresh_token)."""
     response = requests.post(
         TOKEN_URL,
         data={
@@ -116,7 +117,8 @@ def exchange_token(code: str, redirect_uri: str, client_id: str, client_secret: 
     token = data.get("access_token", "")
     if not token:
         raise RuntimeError(f"Token exchange returned no access_token: {json.dumps(data)}")
-    return token
+    refresh_token = data.get("refresh_token", "")
+    return token, refresh_token
 
 
 def fetch_person_urn(access_token: str) -> str:
@@ -236,7 +238,7 @@ def main() -> int:
         return 1
 
     try:
-        access_token = exchange_token(
+        access_token, refresh_token = exchange_token(
             callback.code,
             args.redirect_uri,
             client_id,
@@ -250,6 +252,11 @@ def main() -> int:
     print("LinkedIn token and person URN obtained.")
     print(f"LINKEDIN_PERSON_URN={person_urn}")
     print(f"LINKEDIN_TOKEN={access_token[:14]}...{access_token[-8:]}")
+    if refresh_token:
+        print(f"LINKEDIN_REFRESH_TOKEN={refresh_token[:14]}...{refresh_token[-8:]}")
+        print("(Refresh token obtained — auto-refresh is available for this app.)")
+    else:
+        print("(No refresh token returned — this app may not have MDP refresh token access.)")
 
     if args.no_set_secrets:
         print("Skipped GitHub secret update (--no-set-secrets).")
@@ -263,6 +270,8 @@ def main() -> int:
     try:
         set_gh_secret("LINKEDIN_TOKEN", access_token, repo)
         set_gh_secret("LINKEDIN_PERSON_URN", person_urn, repo)
+        if refresh_token:
+            set_gh_secret("LINKEDIN_REFRESH_TOKEN", refresh_token, repo)
     except Exception as error:
         print(f"ERROR: failed to set GitHub secrets: {error}")
         return 1

@@ -10,6 +10,7 @@ import json
 import os
 import random
 import re
+import subprocess
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -1983,7 +1984,8 @@ def run_article_post_flow(
         log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
         return 1
 
-    if not check_linkedin_token_health(linkedin_token):
+    linkedin_token = check_linkedin_token_health(linkedin_token)
+    if not linkedin_token:
         return 1
 
     try:
@@ -2013,8 +2015,73 @@ def run_article_post_flow(
     return 0
 
 
-def check_linkedin_token_health(token: str) -> bool:
-    """Verify the LinkedIn token is valid before attempting any posts."""
+def set_gh_secret(name: str, value: str, repo: str) -> None:
+    """Set a GitHub Actions secret via gh CLI."""
+    proc = subprocess.run(
+        ["gh", "secret", "set", name, "-R", repo],
+        input=(value + "\n").encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.decode("utf-8", errors="ignore").strip())
+
+
+def refresh_linkedin_token(
+    refresh_token: str, client_id: str, client_secret: str
+) -> Optional[str]:
+    """Attempt to get a new access token using a refresh token. Returns new token or None."""
+    try:
+        response = requests.post(
+            "https://www.linkedin.com/oauth/v2/accessToken",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+    except requests.RequestException as error:
+        log("WARN", f"LinkedIn refresh token request failed ({error})")
+        return None
+
+    if response.status_code >= 400:
+        log("WARN", f"LinkedIn token refresh failed with HTTP {response.status_code}: {response.text[:300]}")
+        return None
+
+    try:
+        data = response.json()
+    except ValueError:
+        log("WARN", "LinkedIn token refresh returned non-JSON response")
+        return None
+
+    new_token = data.get("access_token", "")
+    if not new_token:
+        log("WARN", f"LinkedIn token refresh returned no access_token: {json.dumps(data)[:300]}")
+        return None
+
+    new_refresh = data.get("refresh_token", "")
+    log("INFO", "LinkedIn token refreshed successfully via refresh_token.")
+    if new_refresh:
+        log("INFO", "New refresh token returned; updating stored secrets.")
+        # Persist new tokens to GitHub secrets if repo is available.
+        repo = os.getenv("GITHUB_REPOSITORY", "").strip()
+        if repo:
+            try:
+                set_gh_secret("LINKEDIN_TOKEN", new_token, repo)
+                set_gh_secret("LINKEDIN_REFRESH_TOKEN", new_refresh, repo)
+                log("INFO", f"Updated LINKEDIN_TOKEN and LINKEDIN_REFRESH_TOKEN in {repo}.")
+            except Exception as error:
+                log("WARN", f"Failed to persist refreshed token to GitHub secrets ({error}).")
+        else:
+            log("WARN", "GITHUB_REPOSITORY not set; cannot persist refreshed token to secrets.")
+    return new_token
+
+
+def check_linkedin_token_health(token: str) -> str:
+    """Verify the LinkedIn token is valid. Returns the (possibly refreshed) token, or empty string on failure."""
     headers = {
         "Authorization": f"Bearer {token}",
         "Linkedin-Version": LINKEDIN_API_VERSION,
@@ -2026,20 +2093,27 @@ def check_linkedin_token_health(token: str) -> bool:
             timeout=REQUEST_TIMEOUT,
         )
         if response.status_code == 200:
-            return True
+            return token
         if response.status_code == 401:
-            log("ERROR", "LinkedIn token is expired or invalid. Refresh the LINKEDIN_TOKEN secret.")
-            try:
-                error_data = response.json()
-                log("ERROR", f"LinkedIn auth error: {error_data.get('message', response.text[:200])}")
-            except ValueError:
-                log("ERROR", f"LinkedIn auth error: {response.text[:200]}")
-            return False
+            log("WARN", "LinkedIn access token is expired. Attempting auto-refresh...")
+            refresh_token = os.getenv("LINKEDIN_REFRESH_TOKEN", "").strip()
+            client_id = os.getenv("LINKEDIN_CLIENT_ID", "").strip()
+            client_secret = os.getenv("LINKEDIN_CLIENT_SECRET", "").strip()
+            if refresh_token and client_id and client_secret:
+                new_token = refresh_linkedin_token(refresh_token, client_id, client_secret)
+                if new_token:
+                    return new_token
+                log("ERROR", "Refresh token exchange failed. Re-run bootstrap to get a new token.")
+                log("ERROR", "Run: python src/bootstrap_linkedin_secrets.py --client-id <ID> --repo <OWNER/REPO>")
+                return ""
+            log("ERROR", "No refresh token available. Set LINKEDIN_REFRESH_TOKEN, LINKEDIN_CLIENT_ID, and LINKEDIN_CLIENT_SECRET secrets.")
+            log("ERROR", "Or re-run: python src/bootstrap_linkedin_secrets.py --client-id <ID> --repo <OWNER/REPO>")
+            return ""
         log("WARN", f"LinkedIn token health check returned HTTP {response.status_code}; proceeding anyway.")
-        return True
+        return token
     except requests.RequestException as error:
         log("WARN", f"LinkedIn token health check failed ({error}); proceeding anyway.")
-        return True
+        return token
 
 
 def main() -> int:
@@ -2207,7 +2281,8 @@ def main() -> int:
             log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
             return 1
 
-        if not check_linkedin_token_health(linkedin_token):
+        linkedin_token = check_linkedin_token_health(linkedin_token)
+        if not linkedin_token:
             return 1
 
         direct_result = publish_direct_repost(
