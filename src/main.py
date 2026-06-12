@@ -33,7 +33,7 @@ HN_TOP_STORIES_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
 HN_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
 LINKEDIN_UGC_API_URL = "https://api.linkedin.com/v2/ugcPosts"
 LINKEDIN_POSTS_API_URL = "https://api.linkedin.com/rest/posts"
-LINKEDIN_API_VERSION = "202510"
+LINKEDIN_API_VERSION = "202605"
 NVIDIA_NIM_CHAT_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 DIRECT_REPOST_RESULT_LIMIT = 20
 DEFAULT_REPOST_HISTORY_FILE = ".cache/repost_history.json"
@@ -1733,6 +1733,7 @@ def post_direct_reshare_via_ugc(
     headers = {
         "Authorization": f"Bearer {token}",
         "X-Restli-Protocol-Version": "2.0.0",
+        "Linkedin-Version": LINKEDIN_API_VERSION,
         "Content-Type": "application/json",
     }
     return requests.post(
@@ -1909,6 +1910,7 @@ def post_to_linkedin(
     headers = {
         "Authorization": f"Bearer {token}",
         "X-Restli-Protocol-Version": "2.0.0",
+        "Linkedin-Version": LINKEDIN_API_VERSION,
         "Content-Type": "application/json",
     }
     return requests.post(
@@ -1981,6 +1983,9 @@ def run_article_post_flow(
         log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
         return 1
 
+    if not check_linkedin_token_health(linkedin_token):
+        return 1
+
     try:
         response = post_to_linkedin(post_text, selected, linkedin_token, linkedin_person_urn)
     except requests.RequestException as error:
@@ -2006,6 +2011,35 @@ def run_article_post_flow(
     log("INFO", "LinkedIn post created successfully.")
     print(response.text)
     return 0
+
+
+def check_linkedin_token_health(token: str) -> bool:
+    """Verify the LinkedIn token is valid before attempting any posts."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Linkedin-Version": LINKEDIN_API_VERSION,
+    }
+    try:
+        response = requests.get(
+            "https://api.linkedin.com/v2/userinfo",
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+        if response.status_code == 200:
+            return True
+        if response.status_code == 401:
+            log("ERROR", "LinkedIn token is expired or invalid. Refresh the LINKEDIN_TOKEN secret.")
+            try:
+                error_data = response.json()
+                log("ERROR", f"LinkedIn auth error: {error_data.get('message', response.text[:200])}")
+            except ValueError:
+                log("ERROR", f"LinkedIn auth error: {response.text[:200]}")
+            return False
+        log("WARN", f"LinkedIn token health check returned HTTP {response.status_code}; proceeding anyway.")
+        return True
+    except requests.RequestException as error:
+        log("WARN", f"LinkedIn token health check failed ({error}); proceeding anyway.")
+        return True
 
 
 def main() -> int:
@@ -2173,6 +2207,9 @@ def main() -> int:
             log("ERROR", "Missing LINKEDIN_TOKEN or LINKEDIN_PERSON_URN. Cannot publish.")
             return 1
 
+        if not check_linkedin_token_health(linkedin_token):
+            return 1
+
         direct_result = publish_direct_repost(
             repost_candidates[:15],
             linkedin_token,
@@ -2200,11 +2237,11 @@ def main() -> int:
         return direct_result
 
     return run_article_post_flow(
-                    is_dry_run,
-                    article_history_file,
-                    article_history_max_entries,
-                    article_cooldown_posts,
-                )
+        is_dry_run,
+        article_history_file,
+        article_history_max_entries,
+        article_cooldown_posts,
+    )
 
 
 if __name__ == "__main__":
