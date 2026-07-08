@@ -1,10 +1,10 @@
 name: Post Trending AI and Finance News
-# Scheduled: Weekly Monday 09:00 UTC (1 post per week)
+# Scheduled: Daily 09:00 UTC (Python gate picks 1 random day/week)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 9 * * 1"
+    - cron: "0 9 * * *"
 
 concurrency:
   group: linkedin-reposter-${{ github.ref }}
@@ -49,7 +49,7 @@ jobs:
           LINKEDIN_DIRECT_REPOST_ONLY: "true"
           DIRECT_REPOST_COMMENTARY_STYLE: "none"
           DIRECT_REPOST_ARTICLE_FALLBACK: "true"
-          RANDOMIZE_WEEKLY_RUN_DAYS: "false"
+          RANDOMIZE_WEEKLY_RUN_DAYS: "true"
           RANDOM_SCHEDULE_SEED: ${{ github.repository }}
           REPOST_HISTORY_FILE: .cache/repost_history.json
           REPOST_HISTORY_MAX_ENTRIES: "500"
