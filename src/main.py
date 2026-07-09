@@ -390,7 +390,7 @@ def weekly_random_run_days(seed_material: str, now_utc: datetime) -> list[int]:
     week_key = f"{seed_material}:{iso_year}-W{iso_week}"
     digest = hashlib.sha256(week_key.encode("utf-8")).hexdigest()
     rng = random.Random(int(digest[:16], 16))
-    return sorted(rng.sample(list(range(7)), 2))
+    return sorted(rng.sample(list(range(7)), 1))
 
 
 def parse_positive_int_env(name: str, default_value: int) -> int:

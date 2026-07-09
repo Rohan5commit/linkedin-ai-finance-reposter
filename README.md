@@ -1,6 +1,6 @@
 # LinkedIn AI + Finance Auto-Reposter
 
-Python automation that discovers public AI/tech/finance LinkedIn posts and creates a **direct repost** on your profile twice a week using GitHub Actions.
+Python automation that discovers public AI/tech/finance LinkedIn posts and creates a **direct repost** on your profile once a week using GitHub Actions.
 
 ## What this repository does
 
@@ -133,7 +133,7 @@ If no NIM key is set, the legacy summary mode uses deterministic local summariza
 Workflow file: `.github/workflows/post.yml`
 
 - Workflow triggers **daily at 09:00 UTC** (`cron: 0 9 * * *`)
-- The Python script then selects **2 random days per ISO week** (deterministic for that week) and only posts on those two days
+- The Python script then selects **1 random day per ISO week** (deterministic for that week) and only posts on that day
 - Also supports manual run via **workflow_dispatch**
 
 Workflow steps:
@@ -162,8 +162,8 @@ Mode switch:
 - `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
 - `DIRECT_REPOST_COMMENTARY_STYLE=hashtags|none|full` (default: `none`): control text above direct reposts
 - `DIRECT_REPOST_ARTICLE_FALLBACK=true|false` (default: `true`): if direct repost path cannot publish, automatically post a fresh article instead
-- `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce 2-random-days-per-week gate on scheduled runs
-- `RANDOM_SCHEDULE_SEED=<string>`: changes which two days are selected each week
+- `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce 1-random-day-per-week gate on scheduled runs
+- `RANDOM_SCHEDULE_SEED=<string>`: changes which day is selected each week
 - `REPOST_HISTORY_FILE=.cache/repost_history.json`: file used for cross-run repost memory
 - `REPOST_HISTORY_MAX_ENTRIES=500`: max parent URNs retained in history
 - `REPOST_COOLDOWN_POSTS=120`: most-recent reposts blocked from reuse
