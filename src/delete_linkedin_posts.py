@@ -12,7 +12,7 @@ import requests
 
 REQUEST_TIMEOUT = 20
 LINKEDIN_POSTS_API_URL = "https://api.linkedin.com/rest/posts/{encoded_urn}"
-LINKEDIN_API_VERSION = "202510"
+LINKEDIN_API_VERSION = "202605"
 
 
 def log(level: str, message: str) -> None:

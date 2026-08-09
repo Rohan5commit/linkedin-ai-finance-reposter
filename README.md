@@ -1,6 +1,6 @@
 # LinkedIn AI + Finance Auto-Reposter
 
-Python automation that discovers public AI/tech/finance LinkedIn posts and creates a **direct repost** on your profile once a week using GitHub Actions.
+Python automation that discovers public AI/finance LinkedIn posts and creates a **direct repost** on your profile on a biweekly schedule using GitHub Actions.
 
 ## What this repository does
 
@@ -8,14 +8,14 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 - Extracts candidate parent URNs from public LinkedIn page metadata (`urn:li:share:*` / `urn:li:ugcPost:*`) and ranks them against the URL activity ID.
 - Filters and ranks candidates for topical relevance and recency-style search ranking.
 - Filters out personal career/job-change updates, personal achievement/certificate updates, and promotional non-news posts so reposts stay major-news-focused.
+- Enforces a strict AI/finance-only topic gate (rejects `tech`-only or `general` posts) and blocks market recaps, roundups, and trading-signal/tips content.
 - Enforces a strict direct-repost freshness gate: only candidates with derivable LinkedIn IDs newer than or equal to 7 days (configurable) are eligible.
 - Publishes a **true direct repost** by trying:
   - LinkedIn Posts API (`POST /rest/posts`, `reshareContext.parent`)
   - compatibility fallback via `ugcPosts` (`responseContext.parent`)
-- Uses **no text above reposts by default** to avoid AI-sounding commentary.
-- Supports optional modes: hashtags-only, no text, or full commentary.
+- Posts reposts with **no text at all** (commentary is hardcoded to empty string).
 - Falls back across multiple parent-URN variants and multiple candidates if one repost target is invalid/private.
-- If direct repost discovery fails, freshness filtering eliminates all candidates, or repost publish fails, the run falls back to posting a fresh AI/finance article so cadence is maintained.
+- If the strict topic/freshness/cooldown filters reject every candidate, the run is skipped cleanly (article fallback is disabled in the workflow to guarantee pure reposts).
 - Applies run-based candidate rotation plus persistent repost-history cooldown filtering to prevent heavy repeats.
 - Persists repost and article cooldown history across workflow runs using GitHub Actions cache (`.cache/`).
 - Keeps legacy article-summary mode available only if `LINKEDIN_DIRECT_REPOST_ONLY=false`.
@@ -26,9 +26,16 @@ Python automation that discovers public AI/tech/finance LinkedIn posts and creat
 .
 ├── .github/
 │   └── workflows/
-│       └── post.yml
+│       ├── post.yml          # scheduled repost automation
+│       ├── keepalive.yml     # monthly commit to prevent Actions auto-disable
+│       ├── delete_posts.yml  # manual workflow to delete posts by URN
+│       └── tests.yml         # runs unit tests on push/PR
 ├── src/
-│   └── main.py
+│   ├── main.py               # main repost automation
+│   ├── bootstrap_linkedin_secrets.py  # one-command token + URN bootstrap
+│   └── delete_linkedin_posts.py       # delete posts by URN
+├── tests/
+│   └── test_main.py
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
@@ -133,8 +140,10 @@ If no NIM key is set, the legacy summary mode uses deterministic local summariza
 Workflow file: `.github/workflows/post.yml`
 
 - Workflow triggers **daily at 09:00 UTC** (`cron: 0 9 * * *`)
-- The Python script then selects **1 random day per ISO week** (deterministic for that week) and only posts on that day
-- Also supports manual run via **workflow_dispatch**
+- The Python script then picks **1 random weekday per 2-week (biweekly) window** (deterministic for that window), posting on that weekday — roughly once a week
+- A retry window (default 2 days) allows a run if the selected day was missed and nothing was posted that window yet
+- A monthly `keepalive.yml` commit prevents GitHub from auto-disabling scheduled workflows after 60 days of repo inactivity
+- Also supports manual run via **workflow_dispatch** (manual runs bypass the random-day gate)
 
 Workflow steps:
 
@@ -160,10 +169,12 @@ Mode switch:
 
 - `LINKEDIN_DIRECT_REPOST_ONLY=true` (default): true direct repost path
 - `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
-- `DIRECT_REPOST_COMMENTARY_STYLE=hashtags|none|full` (default: `none`): control text above direct reposts
-- `DIRECT_REPOST_ARTICLE_FALLBACK=true|false` (default: `true`): if direct repost path cannot publish, automatically post a fresh article instead
-- `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce 1-random-day-per-week gate on scheduled runs
-- `RANDOM_SCHEDULE_SEED=<string>`: changes which day is selected each week
+- `DIRECT_REPOST_COMMENTARY_STYLE=none` (hardcoded): reposts are always posted with no text
+- `DIRECT_REPOST_ARTICLE_FALLBACK=false`: if the direct repost path cannot publish, the run is skipped instead of posting an article (this repo's workflow sets `false` to guarantee pure text-free reposts)
+- `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce the 1-random-weekday-per-2-week-window gate on scheduled runs
+- `RANDOM_SCHEDULE_SEED=<string>`: changes which weekday is selected each window
+- `RANDOM_RETRY_WINDOW_DAYS=2`: retry window after the selected day if nothing was posted
+- `POST_WINDOW_MARKER_FILE=.cache/post_window_key`: marker used to prevent duplicate posts within a window
 - `REPOST_HISTORY_FILE=.cache/repost_history.json`: file used for cross-run repost memory
 - `REPOST_HISTORY_MAX_ENTRIES=500`: max parent URNs retained in history
 - `REPOST_COOLDOWN_POSTS=120`: most-recent reposts blocked from reuse
@@ -175,10 +186,10 @@ Mode switch:
 ## Error handling behavior
 
 - In legacy article mode, if no relevant article remains after article cooldown filtering, the run is skipped with a warning and exits successfully.
-- If no repostable LinkedIn post candidates are found, article fallback mode runs (when `DIRECT_REPOST_ARTICLE_FALLBACK=true`); otherwise the run is skipped.
-- If all repost candidates are older than `MAX_REPOST_AGE_DAYS` (or their age cannot be derived from URL/URN IDs), article fallback mode runs (when enabled); otherwise the run is skipped.
-- If all discovered repost candidates were used recently (cooldown history hit), article fallback mode runs (when enabled); otherwise the run is skipped.
-- If all repost attempts fail (invalid parent/private post/permissions), article fallback mode runs (when enabled); otherwise the script exits non-zero.
+- If no repostable LinkedIn post candidates are found, the run is skipped cleanly (article fallback is disabled in the deployed workflow).
+- If all repost candidates are older than `MAX_REPOST_AGE_DAYS` (or their age cannot be derived from URL/URN IDs), the run is skipped cleanly.
+- If all discovered repost candidates were used recently (cooldown history hit), the run is skipped cleanly.
+- If the token is expired, the script attempts an auto-refresh when refresh-token secrets are configured; otherwise it exits non-zero with a clear re-bootstrap message.
 - If every repost attempt returns `403`, the script logs an explicit permission warning to speed up LinkedIn access troubleshooting.
 
 ## Notes

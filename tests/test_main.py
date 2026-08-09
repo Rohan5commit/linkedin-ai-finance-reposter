@@ -98,7 +98,9 @@ class CadenceFallbackTests(unittest.TestCase):
             "main.load_repost_history", return_value=[]
         ), patch("main.prioritize_repost_candidates_for_run", return_value=[fresh_candidate]), patch(
             "main.publish_direct_repost", return_value=main.DIRECT_REPOST_NO_UNUSED_CANDIDATES
-        ), patch("main.run_article_post_flow", return_value=0) as article_flow, patch(
+        ), patch("main.check_linkedin_token_health", return_value="token"), patch(
+            "main.run_article_post_flow", return_value=0
+        ) as article_flow, patch(
             "sys.argv", ["main.py"]
         ):
             result = main.main()
