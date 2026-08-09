@@ -55,23 +55,23 @@ DIRECT_REPOST_NO_UNUSED_CANDIDATES = 2
 DIRECT_REPOST_QUERIES = [
     (
         "ai",
-        'site:linkedin.com/posts ("artificial intelligence" OR AI OR GenAI OR LLM) (launch OR product OR funding OR finance OR technology) when:7d',
+        'site:linkedin.com/posts ("artificial intelligence" OR AI OR GenAI OR LLM) (launch OR product OR funding OR finance OR technology)',
     ),
     (
         "finance",
-        'site:linkedin.com/posts (finance OR fintech OR markets OR banking) (AI OR technology OR startup) when:7d',
+        'site:linkedin.com/posts (finance OR fintech OR markets OR banking) (AI OR technology OR startup)',
     ),
     (
         "tech",
-        'site:linkedin.com/posts (technology OR startup OR software OR semiconductor OR cloud) (AI OR finance) when:7d',
+        'site:linkedin.com/posts (technology OR startup OR software OR semiconductor OR cloud) (AI OR finance)',
     ),
     (
         "funding",
-        'site:linkedin.com/posts (funding OR raised OR valuation OR series OR round) (AI OR fintech OR technology) when:7d',
+        'site:linkedin.com/posts (funding OR raised OR valuation OR series OR round) (AI OR fintech OR technology)',
     ),
     (
         "earnings",
-        'site:linkedin.com/posts (earnings OR revenue OR IPO OR market cap OR quarterly) (AI OR technology OR finance) when:7d',
+        'site:linkedin.com/posts (earnings OR revenue OR IPO OR market cap OR quarterly) (AI OR technology OR finance)',
     ),
 ]
 
@@ -1023,7 +1023,7 @@ def build_article_matched_repost_queries(max_queries: int = 8) -> list[tuple[str
         seen_phrases.add(phrase_key)
 
         topic = candidate.topic if candidate.topic != "general" else "ai-finance"
-        query_text = f'site:linkedin.com/posts "{phrase}" when:7d'
+        query_text = f'site:linkedin.com/posts "{phrase}"'
         queries.append((topic, query_text))
         if len(queries) >= max_queries:
             break
