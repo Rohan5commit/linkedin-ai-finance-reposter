@@ -186,7 +186,7 @@ MARKET_RECAP_PATTERNS = (
     r"\bpre[- ]market\b",
     r"\bfutures (rise|rally|slip|fall|edge|tick|dip|mixed)\b",
     r"\b(dow|nasdaq|s&p 500).*(futures|close|closed|slip|fall|rise|rally|mixed)\b",
-    r"\b(stocks|shares).*(rise|fall|mixed|edge|close|closed)\b",
+    r"\b(stocks|shares|equities|markets|wall street).*(rise|fall|mixed|edge|close|closed|rally|rallies|surge|surges|jump|jumps|tumble|tumbles|plunge|plunges|soar|soars|slip|slips)\b",
 )
 
 PERSONAL_JOB_SIGNAL_TERMS = (
@@ -277,6 +277,53 @@ BLOCKLIST_TERMS = (
     "shooting",
     "hostage",
 )
+
+NON_NEWS_ROUNDUP_SIGNAL_TERMS = (
+    "news roundup",
+    "market roundup",
+    "markets roundup",
+    "weekly roundup",
+    "daily roundup",
+    "monthly roundup",
+    "finance roundup",
+    "fintech roundup",
+    "stock roundup",
+    "market wrap",
+    "weekly wrap",
+    "daily wrap",
+    "market recap",
+    "weekly recap",
+    "daily recap",
+    "market digest",
+    "news digest",
+    "market briefing",
+    "daily briefing",
+    "market summary",
+    "weekly summary",
+    "market update",
+    "daily update",
+    "market movers",
+    "market open",
+    "market close",
+    "closing bell",
+    "stock signals",
+    "stock signal",
+    "trading signals",
+    "trading signal",
+    "trade ideas",
+    "stock picks",
+    "stock tips",
+    "trading tips",
+    "stock watchlist",
+    "best stocks",
+    "stocks to buy",
+    "stock alerts",
+    "trading alerts",
+    "market outlook",
+    "stock outlook",
+)
+
+STRICT_REPOST_TOPICS = ("ai", "ai-finance", "finance")
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
@@ -1083,10 +1130,12 @@ def fetch_linkedin_repost_candidates(max_items_per_query: int = DIRECT_REPOST_RE
                 continue
 
             combined_text = f"{title} {query_text}".lower()
-            topic, keyword_points = detect_topic(combined_text)
-            if topic == "general":
-                topic = query_topic
-            if should_skip_for_recap(topic, combined_text):
+            title_text = f" {clean_text(title).lower()} "
+            topic, keyword_points = detect_topic(title_text)
+            if topic not in STRICT_REPOST_TOPICS:
+                log("INFO", f"Skipping non-AI/finance candidate: topic='{topic}' title='{title}'")
+                continue
+            if should_skip_for_recap(topic, title_text):
                 continue
 
             primary_urn = parent_urn_candidates[0]
@@ -1223,7 +1272,10 @@ def is_job_or_career_post(text: str) -> bool:
 
 
 def is_market_recap(text: str) -> bool:
-    return any(regex.search(text) for regex in MARKET_RECAP_REGEXES)
+    if any(regex.search(text) for regex in MARKET_RECAP_REGEXES):
+        return True
+    normalized = f" {clean_text(text).lower()} "
+    return any(term in normalized for term in NON_NEWS_ROUNDUP_SIGNAL_TERMS)
 
 
 def topical_relevance_points(text: str) -> float:
@@ -1233,17 +1285,7 @@ def topical_relevance_points(text: str) -> float:
 
 
 def should_skip_for_recap(topic: str, text: str) -> bool:
-    if is_market_recap(text):
-        return True
-
-    # Avoid generic market movement recaps; prefer concrete finance/tech news events.
-    if topic == "finance":
-        event_hits = keyword_hit_count(text, NEWS_EVENT_KEYWORDS)
-        ai_hits = keyword_hit_count(text, AI_KEYWORDS)
-        tech_hits = keyword_hit_count(text, TECH_KEYWORDS)
-        if event_hits == 0 and ai_hits == 0 and tech_hits == 0:
-            return True
-    return False
+    return is_market_recap(text)
 
 
 def fetch_rss_candidates(source_name: str, feed_url: str, max_items: int = 20) -> list[ArticleCandidate]:
@@ -1455,26 +1497,7 @@ def choose_hashtags(topic: str) -> list[str]:
 
 
 def build_direct_reshare_commentary(candidate: RepostCandidate) -> str:
-    style = os.getenv("DIRECT_REPOST_COMMENTARY_STYLE", "none").strip().lower()
-    hashtags_line = " ".join(choose_hashtags(candidate.topic))
-
-    if style in {"none", "off", "silent"}:
-        return ""
-
-    if style in {"hashtags", "tags", "minimal"}:
-        return truncate_chars(hashtags_line, LINKEDIN_MAX_POST_CHARS)
-
-    if style == "full":
-        hook = choose_hook(candidate.topic)
-        commentary = (
-            f"{hook}\n\n"
-            f"Direct repost signal: {candidate.title}\n\n"
-            f"{hashtags_line}"
-        )
-        return truncate_chars(commentary, LINKEDIN_MAX_POST_CHARS)
-
-    log("WARN", f"Unknown DIRECT_REPOST_COMMENTARY_STYLE='{style}'; defaulting to hashtags-only.")
-    return truncate_chars(hashtags_line, LINKEDIN_MAX_POST_CHARS)
+    return ""
 
 
 def prioritize_repost_candidates_for_run(candidates: list[RepostCandidate]) -> list[RepostCandidate]:
