@@ -163,13 +163,13 @@ cp .env.example .env
 python src/main.py --dry-run --ignore-random-schedule
 ```
 
-`--dry-run` discovers/ranks repost candidates and prints the repost commentary + parent URN attempts without publishing.
+`--dry-run` discovers/ranks repost candidates and prints the repost preview (empty commentary by design) + parent URN attempts without publishing.
 
 Mode switch:
 
 - `LINKEDIN_DIRECT_REPOST_ONLY=true` (default): true direct repost path
 - `LINKEDIN_DIRECT_REPOST_ONLY=false`: legacy article-summary posting path
-- `DIRECT_REPOST_COMMENTARY_STYLE=none` (hardcoded): reposts are always posted with no text
+- Reposts are always published with **no text** — commentary is hardcoded to empty (no env control)
 - `DIRECT_REPOST_ARTICLE_FALLBACK=false`: if the direct repost path cannot publish, the run is skipped instead of posting an article (this repo's workflow sets `false` to guarantee pure text-free reposts)
 - `RANDOMIZE_WEEKLY_RUN_DAYS=true` (default): enforce the 1-random-weekday-per-2-week-window gate on scheduled runs
 - `RANDOM_SCHEDULE_SEED=<string>`: changes which weekday is selected each window
