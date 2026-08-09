@@ -1,5 +1,5 @@
 name: Post Trending AI and Finance News
-# Scheduled: Daily 09:00 UTC (Python gate picks 1 random day/week)
+# Scheduled: Daily 09:00 UTC (Python gate picks 1 random day / 2-week window)
 
 on:
   workflow_dispatch:
@@ -58,6 +58,8 @@ jobs:
           ARTICLE_HISTORY_MAX_ENTRIES: "500"
           ARTICLE_COOLDOWN_POSTS: "120"
           MAX_REPOST_AGE_DAYS: "7"
+          RANDOM_RETRY_WINDOW_DAYS: "2"
+          POST_WINDOW_MARKER_FILE: .cache/post_window_key
         run: python src/main.py
 
       - name: Success log

@@ -46,6 +46,8 @@ DEFAULT_ARTICLE_COOLDOWN_POSTS = 80
 DEFAULT_MAX_REPOST_AGE_DAYS = 7
 MAX_REPOST_AGE_DAYS_MIN = 1
 MAX_REPOST_AGE_DAYS_MAX = 365
+DEFAULT_RETRY_WINDOW_DAYS = 2
+DEFAULT_POST_WINDOW_MARKER_FILE = ".cache/post_window_key"
 DIRECT_REPOST_SUCCESS = 0
 DIRECT_REPOST_FAILED = 1
 DIRECT_REPOST_NO_UNUSED_CANDIDATES = 2
@@ -53,15 +55,23 @@ DIRECT_REPOST_NO_UNUSED_CANDIDATES = 2
 DIRECT_REPOST_QUERIES = [
     (
         "ai",
-        'site:linkedin.com/posts ("artificial intelligence" OR AI OR GenAI OR LLM) (launch OR product OR funding OR finance OR technology)',
+        'site:linkedin.com/posts ("artificial intelligence" OR AI OR GenAI OR LLM) (launch OR product OR funding OR finance OR technology) when:7d',
     ),
     (
         "finance",
-        'site:linkedin.com/posts (finance OR fintech OR markets OR banking) (AI OR technology OR startup)',
+        'site:linkedin.com/posts (finance OR fintech OR markets OR banking) (AI OR technology OR startup) when:7d',
     ),
     (
         "tech",
-        'site:linkedin.com/posts (technology OR startup OR software OR semiconductor OR cloud) (AI OR finance)',
+        'site:linkedin.com/posts (technology OR startup OR software OR semiconductor OR cloud) (AI OR finance) when:7d',
+    ),
+    (
+        "funding",
+        'site:linkedin.com/posts (funding OR raised OR valuation OR series OR round) (AI OR fintech OR technology) when:7d',
+    ),
+    (
+        "earnings",
+        'site:linkedin.com/posts (earnings OR revenue OR IPO OR market cap OR quarterly) (AI OR technology OR finance) when:7d',
     ),
 ]
 
@@ -385,12 +395,37 @@ def log(level: str, message: str) -> None:
     print(f"[{timestamp}] [{level}] {message}")
 
 
-def weekly_random_run_days(seed_material: str, now_utc: datetime) -> list[int]:
+def biweekly_window_key(now_utc: datetime) -> str:
     iso_year, iso_week, _ = now_utc.isocalendar()
-    week_key = f"{seed_material}:{iso_year}-W{iso_week}"
-    digest = hashlib.sha256(week_key.encode("utf-8")).hexdigest()
+    biweek = (iso_week + 1) // 2
+    return f"{iso_year}-B{biweek}"
+
+
+def weekly_random_run_days(seed_material: str, now_utc: datetime) -> list[int]:
+    window_key = biweekly_window_key(now_utc)
+    digest = hashlib.sha256(f"{seed_material}:{window_key}".encode("utf-8")).hexdigest()
     rng = random.Random(int(digest[:16], 16))
     return sorted(rng.sample(list(range(7)), 1))
+
+
+def load_post_window_marker(marker_file: str) -> Optional[str]:
+    try:
+        if not os.path.exists(marker_file):
+            return None
+        with open(marker_file, "r", encoding="utf-8") as fh:
+            key = fh.read().strip()
+        return key or None
+    except OSError:
+        return None
+
+
+def write_post_window_marker(marker_file: str, window_key: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(marker_file) or ".", exist_ok=True)
+        with open(marker_file, "w", encoding="utf-8") as fh:
+            fh.write(window_key + "\n")
+    except OSError as exc:
+        log("WARN", f"Failed to write post-window marker '{marker_file}': {exc}")
 
 
 def parse_positive_int_env(name: str, default_value: int) -> int:
@@ -922,11 +957,11 @@ def fetch_duckduckgo_results_html(query_topic: str, query_text: str, headers: di
     query_urls = [
         (
             "r.jina.ai",
-            "https://r.jina.ai/http://duckduckgo.com/html/?q=" + quote_plus(query_text),
+            "https://r.jina.ai/http://duckduckgo.com/html/?q=" + quote_plus(query_text) + "&df=w",
         ),
         (
             "duckduckgo-direct",
-            "https://duckduckgo.com/html/?q=" + quote_plus(query_text),
+            "https://duckduckgo.com/html/?q=" + quote_plus(query_text) + "&df=w",
         ),
     ]
     for source_name, query_url in query_urls:
@@ -2143,6 +2178,11 @@ def main() -> int:
     direct_repost_only = os.getenv("LINKEDIN_DIRECT_REPOST_ONLY", "true").strip().lower() != "false"
     randomize_weekly_run_days = os.getenv("RANDOMIZE_WEEKLY_RUN_DAYS", "true").strip().lower() != "false"
     event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower()
+    retry_window_days = parse_positive_int_env("RANDOM_RETRY_WINDOW_DAYS", DEFAULT_RETRY_WINDOW_DAYS)
+    post_window_marker_file = (
+        os.getenv("POST_WINDOW_MARKER_FILE", DEFAULT_POST_WINDOW_MARKER_FILE).strip()
+        or DEFAULT_POST_WINDOW_MARKER_FILE
+    )
     repost_history_file = (
         os.getenv("REPOST_HISTORY_FILE", DEFAULT_REPOST_HISTORY_FILE).strip()
         or DEFAULT_REPOST_HISTORY_FILE
@@ -2163,6 +2203,7 @@ def main() -> int:
     article_cooldown_posts = parse_positive_int_env("ARTICLE_COOLDOWN_POSTS", DEFAULT_ARTICLE_COOLDOWN_POSTS)
     max_repost_age_days = parse_max_repost_age_days_env()
     direct_repost_article_fallback = os.getenv("DIRECT_REPOST_ARTICLE_FALLBACK", "true").strip().lower() != "false"
+    current_window_key: Optional[str] = None
 
     if randomize_weekly_run_days and event_name == "schedule" and not args.ignore_random_schedule:
         now_utc = datetime.now(timezone.utc)
@@ -2173,13 +2214,36 @@ def main() -> int:
         )
         selected_days = weekly_random_run_days(seed_material, now_utc)
         today = now_utc.weekday()
+        current_window_key = biweekly_window_key(now_utc)
         selected_day_labels = [WEEKDAY_NAMES[day] for day in selected_days]
         log(
             "INFO",
-            f"Weekly random schedule days: {', '.join(selected_day_labels)} | today={WEEKDAY_NAMES[today]}",
+            f"Biweekly random schedule days: {', '.join(selected_day_labels)} | "
+            f"today={WEEKDAY_NAMES[today]} | window={current_window_key}",
         )
-        if today not in selected_days:
-            log("INFO", "Today is not one of this week's selected random run days; skipping.")
+        if today in selected_days:
+            pass
+        elif retry_window_days > 0 and selected_days:
+            first_day = selected_days[0]
+            days_since_selected = (today - first_day) % 7
+            if 1 <= days_since_selected <= retry_window_days:
+                marker_key = load_post_window_marker(post_window_marker_file)
+                if marker_key and marker_key == current_window_key:
+                    log(
+                        "INFO",
+                        f"Retry window active but window {current_window_key} already posted; skipping.",
+                    )
+                    return 0
+                log(
+                    "INFO",
+                    f"Retry window active ({days_since_selected}d after first day); "
+                    f"no post recorded this window — allowing run.",
+                )
+            else:
+                log("INFO", "Today is not in the selected day or retry window; skipping.")
+                return 0
+        else:
+            log("INFO", "Today is not one of this window's selected random run days; skipping.")
             return 0
 
     if direct_repost_only:
@@ -2300,23 +2364,34 @@ def main() -> int:
                     log("WARN", "No unused direct repost candidates remain; falling back to article mode.")
                 else:
                     log("WARN", "Direct repost publish failed; falling back to article mode.")
-                return run_article_post_flow(
+                article_result = run_article_post_flow(
                     is_dry_run,
                     article_history_file,
                     article_history_max_entries,
                     article_cooldown_posts,
                 )
+                if not is_dry_run and article_result == 0 and current_window_key:
+                    write_post_window_marker(post_window_marker_file, current_window_key)
+                    log("INFO", f"Wrote post-window marker {current_window_key} after article fallback.")
+                return article_result
             if direct_result == DIRECT_REPOST_NO_UNUSED_CANDIDATES:
                 log("WARN", "Skipping this run because fallback mode is disabled and all reposts are duplicates.")
                 return 0
+        if not is_dry_run and direct_result == DIRECT_REPOST_SUCCESS and current_window_key:
+            write_post_window_marker(post_window_marker_file, current_window_key)
+            log("INFO", f"Wrote post-window marker {current_window_key} after direct repost.")
         return direct_result
 
-    return run_article_post_flow(
+    article_result = run_article_post_flow(
         is_dry_run,
         article_history_file,
         article_history_max_entries,
         article_cooldown_posts,
     )
+    if not is_dry_run and article_result == 0 and current_window_key:
+        write_post_window_marker(post_window_marker_file, current_window_key)
+        log("INFO", f"Wrote post-window marker {current_window_key} after article post.")
+    return article_result
 
 
 if __name__ == "__main__":
