@@ -643,9 +643,11 @@ def save_repost_history(file_path: str, recent_parent_urns: list[str], max_entri
         "recent_parent_urns": deduped_urns[-max_entries:],
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    with open(file_path, "w", encoding="utf-8") as history_file:
+    tmp_path = file_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as history_file:
         json.dump(payload, history_file, ensure_ascii=True, indent=2)
         history_file.write("\n")
+    os.replace(tmp_path, file_path)
 
 
 def recent_parent_urn_window(recent_parent_urns: list[str], cooldown_posts: int) -> set[str]:
@@ -717,9 +719,11 @@ def save_article_history(file_path: str, recent_article_keys: list[str], max_ent
         "recent_article_keys": deduped_keys[-max_entries:],
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    with open(file_path, "w", encoding="utf-8") as history_file:
+    tmp_path = file_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as history_file:
         json.dump(payload, history_file, ensure_ascii=True, indent=2)
         history_file.write("\n")
+    os.replace(tmp_path, file_path)
 
 
 def recent_article_key_window(recent_article_keys: list[str], cooldown_posts: int) -> set[str]:
@@ -2253,7 +2257,8 @@ def main() -> int:
         elif retry_window_days > 0 and selected_days:
             first_day = selected_days[0]
             days_since_selected = (today - first_day) % 7
-            if 1 <= days_since_selected <= retry_window_days:
+            effective_retry_days = min(retry_window_days, 6 - first_day)
+            if 1 <= days_since_selected <= effective_retry_days:
                 marker_key = load_post_window_marker(post_window_marker_file)
                 if marker_key and marker_key == current_window_key:
                     log(
