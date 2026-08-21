@@ -2245,6 +2245,10 @@ def main() -> int:
             f"today={WEEKDAY_NAMES[today]} | window={current_window_key}",
         )
         if today in selected_days:
+            marker_key = load_post_window_marker(post_window_marker_file)
+            if marker_key and marker_key == current_window_key:
+                log("INFO", f"Window {current_window_key} already posted; skipping.")
+                return 0
             pass
         elif retry_window_days > 0 and selected_days:
             first_day = selected_days[0]
